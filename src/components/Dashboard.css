@@ -1,0 +1,90 @@
+/* Dashboard View */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.25rem;
+  margin-bottom: 2rem;
+}
+
+.stat-card {
+  background: var(--bg-card);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1.5rem;
+  position: relative;
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+}
+
+.stat-card h3 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 0.5rem;
+}
+
+.stat-number {
+  font-size: 2.25rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.stat-icon {
+  position: absolute;
+  right: 1.5rem;
+  bottom: 1.5rem;
+  opacity: 0.15;
+  color: var(--color-indigo);
+}
+
+.stat-card.urgent { border-top: 3px solid var(--color-rose); }
+.stat-card.urgent .stat-icon { color: var(--color-rose); }
+.stat-card.warning { border-top: 3px solid var(--color-amber); }
+.stat-card.warning .stat-icon { color: var(--color-amber); }
+.stat-card.success { border-top: 3px solid var(--color-emerald); }
+.stat-card.success .stat-icon { color: var(--color-emerald); }
+
+.dashboard-charts-placeholder {
+  background: var(--bg-card);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+
+.dashboard-charts-placeholder h3 {
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+}
+
+.progress-bar-container {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 20px;
+  height: 24px;
+  overflow: hidden;
+  margin-bottom: 1.5rem;
+}
+
+.progress-bar {
+  background: linear-gradient(to right, var(--color-indigo), var(--color-purple));
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: white;
+  transition: width 0.4s ease;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.distribution-details {
+  display: flex;
+  gap: 2rem;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
