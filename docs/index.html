@@ -7,19 +7,21 @@
   <title>Jakson Todo - Gerenciador de Tarefas</title>
   <style>
     body { font-family: system-ui, sans-serif; background: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 1rem; box-sizing: border-box; }
-    .card { background: #1e293b; padding: 2.5rem; border-radius: 12px; max-width: 600px; width: 100%; box-shadow: 0 10px 25px rgba(0,0,0,0.3); }
-    h1 { color: #6366f1; margin-top: 0; }
-    p { line-height: 1.6; color: #cbd5e1; }
-    a { color: #818cf8; text-decoration: none; }
+    .card { background: #1e293b; padding: 2.5rem; border-radius: 12px; max-width: 600px; width: 100%; box-shadow: 0 10px 25px rgba(0,0,0,0.3); text-align: center; }
+    .app-logo { width: 110px; height: 110px; border-radius: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.25); margin-bottom: 1rem; }
+    h1 { color: #6366f1; margin: 0.5rem 0 1rem; font-size: 1.8rem; }
+    p { line-height: 1.6; color: #cbd5e1; text-align: left; }
+    a { color: #818cf8; text-decoration: none; font-weight: 500; }
     a:hover { text-decoration: underline; }
-    .links { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #334155; }
+    .links { margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px solid #334155; text-align: center; }
   </style>
 </head>
 <body>
   <div class="card">
+    <img src="jakson_todo.png" alt="Jakson Todo Logo" class="app-logo" />
     <h1>Jakson Todo</h1>
-    <p>Aplicativo desktop leve e seguro para gerenciamento de tarefas pessoais e fluxo diário de produtividade.</p>
-    <p>Os dados são armazenados localmente e com suporte a backup opcional e criptografado na sua conta Google Drive.</p>
+    <p>Aplicativo desktop moderno, leve e seguro para gerenciamento de tarefas pessoais e fluxo diário de produtividade.</p>
+    <p>Todos os dados são salvos localmente no seu computador (SQLite) com suporte a backup opcional e isolado no Google Drive (pasta <code>appDataFolder</code>).</p>
     <div class="links">
       <p><a href="privacy.html">👉 Política de Privacidade (Privacy Policy)</a></p>
     </div>
