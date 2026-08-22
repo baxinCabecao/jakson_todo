@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { Plus, Menu } from "lucide-react";
 
 import "./App.css"; // CRITICAL: Import the layout styles!
@@ -361,27 +360,13 @@ function App() {
   };
 
   // Trigger Cloud Authorize flow
-  const handleConnectProvider = async (provider: "gdrive" | "onedrive", clientId: string, clientSecret: string) => {
-    if (!clientId.trim()) {
-      alert("Por favor, insira o Client ID correspondente para prosseguir.");
-      return;
-    }
-
+  const handleConnectProvider = async (provider: "gdrive" | "onedrive", clientId?: string, clientSecret?: string) => {
     try {
       await invoke("start_oauth", {
         provider,
-        clientId,
-        clientSecret: clientSecret.trim() ? clientSecret : "",
+        clientId: clientId?.trim() || null,
+        clientSecret: clientSecret?.trim() || null,
       });
-
-      let url = "";
-      if (provider === "gdrive") {
-        url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=http://localhost:59135&response_type=code&scope=https://www.googleapis.com/auth/drive.file&access_type=offline&prompt=consent`;
-      } else {
-        url = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=${clientId}&redirect_uri=http://localhost:59135&response_type=code&scope=files.readwrite%20offline_access&response_mode=query`;
-      }
-
-      await openUrl(url);
     } catch (e) {
       alert(`Erro ao iniciar fluxo OAuth: ${e}`);
     }

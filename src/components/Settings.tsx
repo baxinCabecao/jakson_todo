@@ -1,18 +1,111 @@
 import React, { useState, useEffect } from "react";
-import { Cloud, Clock, RefreshCw, Database } from "lucide-react";
+import { Cloud, Clock, RefreshCw, Database, ShieldCheck, ChevronDown, ChevronUp } from "lucide-react";
 import { AppSettings } from "../types";
 import "./Settings.css";
 
 interface SettingsProps {
   settings: AppSettings;
   onSaveSettings: (settings: AppSettings) => void;
-  onConnectProvider: (provider: "gdrive" | "onedrive", clientId: string, clientSecret: string) => void;
+  onConnectProvider: (provider: "gdrive" | "onedrive", clientId?: string, clientSecret?: string) => void;
   onRestoreBackup: (provider: string) => void;
   isRestoring: boolean;
   isBackingUp: boolean;
   backupReport: any;
   onManualBackup: () => void;
 }
+
+interface ProviderCardProps {
+  name: string;
+  provider: "gdrive" | "onedrive";
+  enabled: boolean;
+  onToggle: (enabled: boolean) => void;
+  onConnect: () => void;
+  clientId: string;
+  setClientId: (val: string) => void;
+  clientSecret: string;
+  setClientSecret: (val: string) => void;
+  isPkce?: boolean;
+}
+
+const ProviderSection: React.FC<ProviderCardProps> = ({
+  name,
+  provider,
+  enabled,
+  onToggle,
+  onConnect,
+  clientId,
+  setClientId,
+  clientSecret,
+  setClientSecret,
+  isPkce = false,
+}) => {
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  return (
+    <section className="settings-section-card">
+      <div className="section-header">
+        <Cloud size={20} className="section-icon" />
+        <h2>Integração com {name}</h2>
+      </div>
+
+      {isPkce && (
+        <div className="provider-info-box">
+          <ShieldCheck size={18} className="text-emerald" />
+          <span>
+            Autenticação segura via <strong>PKCE</strong> (sem segredo exposto) e armazenamento isolado na pasta interna (<strong>appDataFolder</strong>).
+          </span>
+        </div>
+      )}
+
+      <div className="provider-status-row">
+        <div className={`status-badge ${enabled ? "connected" : "disconnected"}`}>
+          {enabled ? "Habilitado e Conectado" : "Não Conectado"}
+        </div>
+        <button type="button" className="btn-secondary" onClick={onConnect}>
+          {enabled ? `Reconectar ${name}` : `Conectar ${name}`}
+        </button>
+        <label className="toggle-backup-label">
+          <input type="checkbox" checked={enabled} onChange={(e) => onToggle(e.target.checked)} />
+          <span>Ativar Backup Automático</span>
+        </label>
+      </div>
+
+      <div className="advanced-toggle-wrapper">
+        <button
+          type="button"
+          className="btn-text-toggle"
+          onClick={() => setShowAdvanced(!showAdvanced)}
+        >
+          {showAdvanced ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          <span>Configurações Avançadas (Chaves Personalizadas)</span>
+        </button>
+      </div>
+
+      {showAdvanced && (
+        <div className="form-group-row advanced-fields">
+          <div className="form-group-field">
+            <label>Client ID {provider === "gdrive" ? "(Opcional - compilado no Rust)" : ""}</label>
+            <input
+              type="text"
+              placeholder={provider === "gdrive" ? "Padrão embutido no backend" : "Ex: 5d1345a-cf2a-43d2"}
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+            />
+          </div>
+          <div className="form-group-field">
+            <label>Client Secret (Opcional)</label>
+            <input
+              type="password"
+              placeholder={provider === "gdrive" ? "Não obrigatório com PKCE" : "••••••••••••••••"}
+              value={clientSecret}
+              onChange={(e) => setClientSecret(e.target.value)}
+            />
+          </div>
+        </div>
+      )}
+    </section>
+  );
+};
 
 export const Settings: React.FC<SettingsProps> = ({
   settings,
@@ -32,7 +125,6 @@ export const Settings: React.FC<SettingsProps> = ({
   const [gdriveEnabled, setGdriveEnabled] = useState(false);
   const [onedriveEnabled, setOnedriveEnabled] = useState(false);
 
-  // Sync state with settings prop
   useEffect(() => {
     setGdriveClientId(settings.gdrive_client_id || "");
     setGdriveClientSecret(settings.gdrive_client_secret || "");
@@ -45,17 +137,16 @@ export const Settings: React.FC<SettingsProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const updatedSettings: AppSettings = {
+    onSaveSettings({
       ...settings,
-      gdrive_client_id: gdriveClientId.trim() ? gdriveClientId : undefined,
-      gdrive_client_secret: gdriveClientSecret.trim() ? gdriveClientSecret : undefined,
-      onedrive_client_id: onedriveClientId.trim() ? onedriveClientId : undefined,
-      onedrive_client_secret: onedriveClientSecret.trim() ? onedriveClientSecret : undefined,
+      gdrive_client_id: gdriveClientId.trim() || undefined,
+      gdrive_client_secret: gdriveClientSecret.trim() || undefined,
+      onedrive_client_id: onedriveClientId.trim() || undefined,
+      onedrive_client_secret: onedriveClientSecret.trim() || undefined,
       backup_frequency_mins: backupFrequencyMins,
       gdrive_enabled: gdriveEnabled,
       onedrive_enabled: onedriveEnabled,
-    };
-    onSaveSettings(updatedSettings);
+    });
   };
 
   return (
@@ -68,113 +159,30 @@ export const Settings: React.FC<SettingsProps> = ({
       </header>
 
       <form onSubmit={handleSubmit} className="settings-form">
-        {/* Google Drive Configuration Card */}
-        <section className="settings-section-card">
-          <div className="section-header">
-            <Cloud size={20} className="section-icon" />
-            <h2>Integração com Google Drive</h2>
-          </div>
+        <ProviderSection
+          name="Google Drive"
+          provider="gdrive"
+          enabled={gdriveEnabled}
+          onToggle={setGdriveEnabled}
+          onConnect={() => onConnectProvider("gdrive", gdriveClientId, gdriveClientSecret)}
+          clientId={gdriveClientId}
+          setClientId={setGdriveClientId}
+          clientSecret={gdriveClientSecret}
+          setClientSecret={setGdriveClientSecret}
+          isPkce
+        />
 
-          <div className="form-group-row">
-            <div className="form-group-field">
-              <label>Client ID do Google Drive</label>
-              <input
-                type="text"
-                placeholder="Ex: 123456789-abc.apps.googleusercontent.com"
-                value={gdriveClientId}
-                onChange={(e) => setGdriveClientId(e.target.value)}
-              />
-            </div>
-            <div className="form-group-field">
-              <label>Client Secret do Google Drive</label>
-              <input
-                type="password"
-                placeholder="••••••••••••••••"
-                value={gdriveClientSecret}
-                onChange={(e) => setGdriveClientSecret(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="provider-status-row">
-            <div
-              className={`status-badge ${
-                settings.gdrive_enabled ? "connected" : "disconnected"
-              }`}
-            >
-              {settings.gdrive_enabled ? "Habilitado e Conectado" : "Não Conectado"}
-            </div>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => onConnectProvider("gdrive", gdriveClientId, gdriveClientSecret)}
-            >
-              {settings.gdrive_enabled ? "Reautorizar GDrive" : "Conectar Google Drive"}
-            </button>
-            <label className="toggle-backup-label">
-              <input
-                type="checkbox"
-                checked={gdriveEnabled}
-                onChange={(e) => setGdriveEnabled(e.target.checked)}
-              />
-              <span>Ativar Google Drive Backup</span>
-            </label>
-          </div>
-        </section>
-
-        {/* OneDrive Configuration Card */}
-        <section className="settings-section-card">
-          <div className="section-header">
-            <Cloud size={20} className="section-icon" />
-            <h2>Integração com Microsoft OneDrive</h2>
-          </div>
-
-          <div className="form-group-row">
-            <div className="form-group-field">
-              <label>Client ID do OneDrive</label>
-              <input
-                type="text"
-                placeholder="Ex: 5d1345a-cf2a-43d2"
-                value={onedriveClientId}
-                onChange={(e) => setOnedriveClientId(e.target.value)}
-              />
-            </div>
-            <div className="form-group-field">
-              <label>Client Secret do OneDrive (Opcional)</label>
-              <input
-                type="password"
-                placeholder="••••••••••••••••"
-                value={onedriveClientSecret}
-                onChange={(e) => setOnedriveClientSecret(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="provider-status-row">
-            <div
-              className={`status-badge ${
-                settings.onedrive_enabled ? "connected" : "disconnected"
-              }`}
-            >
-              {settings.onedrive_enabled ? "Habilitado e Conectado" : "Não Conectado"}
-            </div>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => onConnectProvider("onedrive", onedriveClientId, onedriveClientSecret)}
-            >
-              {settings.onedrive_enabled ? "Reautorizar OneDrive" : "Conectar OneDrive"}
-            </button>
-            <label className="toggle-backup-label">
-              <input
-                type="checkbox"
-                checked={onedriveEnabled}
-                onChange={(e) => setOnedriveEnabled(e.target.checked)}
-              />
-              <span>Ativar OneDrive Backup</span>
-            </label>
-          </div>
-        </section>
+        <ProviderSection
+          name="OneDrive"
+          provider="onedrive"
+          enabled={onedriveEnabled}
+          onToggle={setOnedriveEnabled}
+          onConnect={() => onConnectProvider("onedrive", onedriveClientId, onedriveClientSecret)}
+          clientId={onedriveClientId}
+          setClientId={setOnedriveClientId}
+          clientSecret={onedriveClientSecret}
+          setClientSecret={setOnedriveClientSecret}
+        />
 
         {/* Auto Backup Options */}
         <section className="settings-section-card">
@@ -192,8 +200,7 @@ export const Settings: React.FC<SettingsProps> = ({
               onChange={(e) => setBackupFrequencyMins(parseInt(e.target.value) || 60)}
             />
             <p className="field-tip">
-              Define o intervalo de tempo em que a aplicação salvará silenciosamente os
-              dados na nuvem.
+              Define o intervalo em que a aplicação salvará silenciosamente os dados na nuvem.
             </p>
           </div>
         </section>
@@ -220,10 +227,7 @@ export const Settings: React.FC<SettingsProps> = ({
           <Database size={20} className="section-icon text-rose" />
           <h2>Restauração de Backup Manual</h2>
         </div>
-        <p>
-          Você pode forçar a restauração dos seus dados a partir dos arquivos salvos em
-          nuvem a qualquer momento.
-        </p>
+        <p>Você pode forçar a restauração dos seus dados salvos em nuvem a qualquer momento.</p>
 
         <div className="restore-actions">
           <button
@@ -257,9 +261,7 @@ export const Settings: React.FC<SettingsProps> = ({
                     {backupReport.onedrive.success ? (
                       <span className="text-emerald">Sucesso</span>
                     ) : (
-                      <span className="text-rose">
-                        Falhou ({backupReport.onedrive.error_message})
-                      </span>
+                      <span className="text-rose">Falhou ({backupReport.onedrive.error_message})</span>
                     )}
                   </p>
                 )}
@@ -269,9 +271,7 @@ export const Settings: React.FC<SettingsProps> = ({
                     {backupReport.gdrive.success ? (
                       <span className="text-emerald">Sucesso</span>
                     ) : (
-                      <span className="text-rose">
-                        Falhou ({backupReport.gdrive.error_message})
-                      </span>
+                      <span className="text-rose">Falhou ({backupReport.gdrive.error_message})</span>
                     )}
                   </p>
                 )}

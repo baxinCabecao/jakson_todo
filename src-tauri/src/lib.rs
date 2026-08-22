@@ -71,7 +71,12 @@ async fn trigger_backup(app_handle: AppHandle, state: State<'_, AppState>) -> Re
 }
 
 #[tauri::command]
-async fn start_oauth(provider: String, client_id: String, client_secret: String, app_handle: AppHandle) -> Result<(), String> {
+async fn start_oauth(
+    provider: String,
+    client_id: Option<String>,
+    client_secret: Option<String>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
     crate::backup::start_oauth_flow(provider, client_id, client_secret, app_handle).await
 }
 

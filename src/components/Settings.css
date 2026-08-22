@@ -134,6 +134,53 @@
   accent-color: var(--color-indigo);
 }
 
+.provider-info-box {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.provider-info-box strong {
+  color: var(--color-emerald);
+}
+
+.advanced-toggle-wrapper {
+  margin-top: 1rem;
+}
+
+.btn-text-toggle {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  padding: 0.25rem 0;
+  transition: color 0.2s ease;
+}
+
+.btn-text-toggle:hover {
+  color: var(--text-primary);
+}
+
+.advanced-fields {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px dashed var(--border-color);
+  animation: fadeIn 0.2s ease-in-out;
+}
+
 .settings-actions-footer {
   display: flex;
   gap: 1rem;

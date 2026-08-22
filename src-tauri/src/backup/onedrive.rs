@@ -1,36 +1,42 @@
+use crate::backup::oauth::get_effective_onedrive_client_id;
+use crate::backup::types::{OneDriveFileResponse, RemoteBackupInfo, TokenResponse};
 use crate::db::AppSettings;
-use crate::backup::types::{RemoteBackupInfo, TokenResponse, OneDriveFileResponse};
 
 /// Refresh OneDrive access token
 pub async fn refresh_onedrive_access_token(
     client_id: &str,
-    client_secret: &str,
+    client_secret: Option<&str>,
     refresh_token: &str,
 ) -> Result<String, String> {
     let client = reqwest::Client::new();
-    let params = [
+    let mut params = vec![
         ("client_id", client_id),
-        ("client_secret", client_secret),
         ("refresh_token", refresh_token),
         ("grant_type", "refresh_token"),
     ];
+
+    if let Some(sec) = client_secret {
+        if !sec.is_empty() {
+            params.push(("client_secret", sec));
+        }
+    }
 
     let res = client
         .post("https://login.microsoftonline.com/common/oauth2/v2.0/token")
         .form(&params)
         .send()
         .await
-        .map_err(|e| format!("Failed to refresh OneDrive token: {}", e))?;
+        .map_err(|e| format!("Falha ao renovar token do OneDrive: {}", e))?;
 
     if !res.status().is_success() {
         let err_text = res.text().await.unwrap_or_default();
-        return Err(format!("OneDrive token refresh API error: {}", err_text));
+        return Err(format!("Erro na API de renovação do OneDrive: {}", err_text));
     }
 
     let token_resp: TokenResponse = res
         .json()
         .await
-        .map_err(|e| format!("Failed to parse OneDrive refresh response: {}", e))?;
+        .map_err(|e| format!("Falha ao processar resposta do OneDrive: {}", e))?;
 
     Ok(token_resp.access_token)
 }
@@ -54,11 +60,11 @@ pub async fn upload_to_onedrive(
         .body(db_bytes)
         .send()
         .await
-        .map_err(|e| format!("Failed to upload to OneDrive: {}", e))?;
+        .map_err(|e| format!("Falha no envio para o OneDrive: {}", e))?;
 
     if !res.status().is_success() {
         let err_text = res.text().await.unwrap_or_default();
-        return Err(format!("OneDrive upload failed: {}", err_text));
+        return Err(format!("Falha no upload do OneDrive: {}", err_text));
     }
 
     Ok(())
@@ -78,21 +84,27 @@ pub async fn get_onedrive_backup_info(
         return info;
     }
 
-    if let (Some(cid), Some(sec), Some(ref_token)) = (
-        &settings.onedrive_client_id,
-        &settings.onedrive_client_secret,
-        &settings.onedrive_refresh_token,
-    ) {
-        if let Ok(access_token) = refresh_onedrive_access_token(cid, sec, ref_token).await {
-            let client = reqwest::Client::new();
-            let url = "https://graph.microsoft.com/v1.0/me/drive/root:/jakson_todo_backup.db";
-            
-            if let Ok(res) = client.get(url).bearer_auth(&access_token).send().await {
-                if res.status().is_success() {
-                    if let Ok(file_info) = res.json::<OneDriveFileResponse>().await {
-                        info.exists = true;
-                        info.last_modified = file_info.last_modified_date_time;
-                    }
+    let refresh_token = match &settings.onedrive_refresh_token {
+        Some(token) if !token.trim().is_empty() => token,
+        _ => return info,
+    };
+
+    let client_id = get_effective_onedrive_client_id(settings.onedrive_client_id.as_deref());
+    if client_id.is_empty() {
+        return info;
+    }
+
+    let client_secret = settings.onedrive_client_secret.as_deref();
+
+    if let Ok(access_token) = refresh_onedrive_access_token(&client_id, client_secret, refresh_token).await {
+        let client = reqwest::Client::new();
+        let url = "https://graph.microsoft.com/v1.0/me/drive/root:/jakson_todo_backup.db";
+
+        if let Ok(res) = client.get(url).bearer_auth(&access_token).send().await {
+            if res.status().is_success() {
+                if let Ok(file_info) = res.json::<OneDriveFileResponse>().await {
+                    info.exists = true;
+                    info.last_modified = file_info.last_modified_date_time;
                 }
             }
         }
