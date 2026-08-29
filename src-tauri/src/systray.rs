@@ -1,3 +1,4 @@
+#[cfg(desktop)]
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -5,6 +6,7 @@ use tauri::{
 };
 
 /// Set up the system tray for the application
+#[cfg(desktop)]
 pub fn setup_systray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let app_handle = app.handle();
 
@@ -21,7 +23,7 @@ pub fn setup_systray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>>
     let _tray = TrayIconBuilder::new()
         .icon(icon)
         .menu(&menu)
-        .show_menu_on_left_click(false) // Left click will toggle window, right click opens menu
+        .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
@@ -49,6 +51,7 @@ pub fn setup_systray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>>
 }
 
 /// Helper function to show and focus the main webview window
+#[cfg(desktop)]
 fn show_main_window(app_handle: &AppHandle) {
     if let Some(window) = app_handle.get_webview_window("main") {
         let _ = window.show();

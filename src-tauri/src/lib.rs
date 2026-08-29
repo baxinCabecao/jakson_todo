@@ -1,5 +1,6 @@
 mod db;
 mod backup;
+#[cfg(desktop)]
 mod systray;
 
 use crate::db::{AppSettings, DbConnection, Task};
@@ -78,6 +79,11 @@ async fn start_oauth(
     app_handle: AppHandle,
 ) -> Result<(), String> {
     crate::backup::start_oauth_flow(provider, client_id, client_secret, app_handle).await
+}
+
+#[tauri::command]
+async fn handle_oauth_url(url: String, app_handle: AppHandle) -> Result<(), String> {
+    crate::backup::process_oauth_callback_url(&url, app_handle).await
 }
 
 #[tauri::command]
@@ -262,9 +268,11 @@ fn start_auto_backup_loop(app_handle: AppHandle, db_path: PathBuf) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_deep_link::init())
         .setup(|app| {
             let app_handle = app.handle().clone();
             let app_dir = app_handle.path().app_data_dir().unwrap();
@@ -277,7 +285,8 @@ pub fn run() {
             // Register AppState
             app.manage(AppState { db_path: db_path.clone() });
 
-            // Setup system tray
+            // Setup system tray for desktop
+            #[cfg(desktop)]
             crate::systray::setup_systray(app).expect("Failed to setup system tray");
 
             // Run startup notifications
@@ -287,14 +296,20 @@ pub fn run() {
             start_auto_backup_loop(app_handle, db_path);
 
             Ok(())
-        })
-        .on_window_event(|window, event| {
+        });
+
+    #[cfg(desktop)]
+    {
+        builder = builder.on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // Prevent app from exiting and hide the window instead
-                window.hide().unwrap();
+                let _ = window.hide();
                 api.prevent_close();
             }
-        })
+        });
+    }
+
+    builder
         .invoke_handler(tauri::generate_handler![
             get_tasks,
             create_task,
@@ -304,6 +319,7 @@ pub fn run() {
             save_settings,
             trigger_backup,
             start_oauth,
+            handle_oauth_url,
             check_backups,
             restore_backup
         ])

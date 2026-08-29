@@ -21,6 +21,13 @@
       "csp": null
     }
   },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["jaksontodo", "com.f4613569.tauri-app"]
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["appimage"],

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { Plus, Menu } from "lucide-react";
 
 import "./App.css"; // CRITICAL: Import the layout styles!
@@ -92,9 +93,21 @@ function App() {
       alert(`Erro na autenticação: ${event.payload}`);
     });
 
+    // Listen for OAuth deep link callbacks (Mobile & Desktop)
+    const unlistenDeepLink = onOpenUrl((urls) => {
+      for (const url of urls) {
+        if (url.includes("code=") || url.includes("error=")) {
+          invoke("handle_oauth_url", { url }).catch((err) => {
+            console.error("Erro ao processar callback OAuth via Deep Link:", err);
+          });
+        }
+      }
+    });
+
     return () => {
       unlistenSuccess.then((f) => f());
       unlistenError.then((f) => f());
+      unlistenDeepLink.then((f) => f());
     };
   }, []);
 

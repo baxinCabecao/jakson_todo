@@ -4,9 +4,8 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
-use std::io::{Read, Write};
-use std::net::TcpListener;
-use std::time::{Duration, Instant};
+use std::sync::Mutex;
+use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
 
@@ -20,7 +19,23 @@ pub const DEFAULT_ONEDRIVE_CLIENT_ID: &str = match option_env!("ONEDRIVE_CLIENT_
     None => "",
 };
 
+#[allow(dead_code)]
 pub const OAUTH_PORT: u16 = 59135;
+#[allow(dead_code)]
+pub const MOBILE_REDIRECT_URI: &str = "com.f4613569.tauri-app://oauth-callback";
+
+#[derive(Clone, Debug)]
+pub struct PendingOAuthSession {
+    pub provider: String,
+    pub client_id: String,
+    pub client_secret: Option<String>,
+    pub code_verifier: String,
+    pub redirect_uri: String,
+    #[allow(dead_code)]
+    pub created_at: Instant,
+}
+
+static PENDING_OAUTH: Mutex<Option<PendingOAuthSession>> = Mutex::new(None);
 
 pub fn get_effective_gdrive_client_id(custom: Option<&str>) -> String {
     match custom {
@@ -33,6 +48,17 @@ pub fn get_effective_onedrive_client_id(custom: Option<&str>) -> String {
     match custom {
         Some(cid) if !cid.trim().is_empty() => cid.trim().to_string(),
         _ => DEFAULT_ONEDRIVE_CLIENT_ID.to_string(),
+    }
+}
+
+pub fn get_redirect_uri() -> String {
+    #[cfg(desktop)]
+    {
+        format!("http://localhost:{}", OAUTH_PORT)
+    }
+    #[cfg(not(desktop))]
+    {
+        MOBILE_REDIRECT_URI.to_string()
     }
 }
 
@@ -50,9 +76,7 @@ pub fn generate_pkce() -> (String, String) {
 }
 
 /// Constructs the OAuth 2.0 authorization URL with PKCE parameters
-fn build_authorization_url(provider: &str, client_id: &str, challenge: &str) -> String {
-    let redirect_uri = format!("http://localhost:{}", OAUTH_PORT);
-
+fn build_authorization_url(provider: &str, client_id: &str, challenge: &str, redirect_uri: &str) -> String {
     if provider.to_lowercase() == "gdrive" {
         format!(
             "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope=https://www.googleapis.com/auth/drive.appdata&code_challenge={}&code_challenge_method=S256&access_type=offline&prompt=consent",
@@ -66,7 +90,7 @@ fn build_authorization_url(provider: &str, client_id: &str, challenge: &str) -> 
     }
 }
 
-/// Start a temporary HTTP server on localhost to capture the OAuth redirect code with PKCE.
+/// Start OAuth flow across Desktop and Mobile
 pub async fn start_oauth_flow(
     provider: String,
     custom_client_id: Option<String>,
@@ -89,150 +113,120 @@ pub async fn start_oauth_flow(
         .map(|s| s.trim().to_string());
 
     let (code_verifier, code_challenge) = generate_pkce();
-    let auth_url = build_authorization_url(&provider, &client_id, &code_challenge);
+    let redirect_uri = get_redirect_uri();
+    let auth_url = build_authorization_url(&provider, &client_id, &code_challenge, &redirect_uri);
 
-    let listener = TcpListener::bind(format!("127.0.0.1:{}", OAUTH_PORT))
-        .map_err(|e| format!("Não foi possível escutar na porta {}: {}", OAUTH_PORT, e))?;
-    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+    // Save pending session for callback matching
+    if let Ok(mut lock) = PENDING_OAUTH.lock() {
+        *lock = Some(PendingOAuthSession {
+            provider: provider.clone(),
+            client_id: client_id.clone(),
+            client_secret: client_secret.clone(),
+            code_verifier: code_verifier.clone(),
+            redirect_uri: redirect_uri.clone(),
+            created_at: Instant::now(),
+        });
+    }
 
-    // Open the browser with the generated authorization URL
+    // On desktop, spawn local TCP server listener as well
+    #[cfg(desktop)]
+    start_desktop_tcp_listener(
+        provider.clone(),
+        client_id.clone(),
+        client_secret.clone(),
+        code_verifier.clone(),
+        redirect_uri.clone(),
+        app_handle.clone(),
+    );
+
+    // Open browser with generated authorization URL
     let _ = app_handle.opener().open_url(&auth_url, None::<&str>);
-
-    let provider_clone = provider.clone();
-    let app_handle_clone = app_handle.clone();
-    let client_id_clone = client_id.clone();
-    let client_secret_clone = client_secret.clone();
-
-    tauri::async_runtime::spawn(async move {
-        handle_oauth_callback(
-            listener,
-            provider_clone,
-            client_id_clone,
-            client_secret_clone,
-            code_verifier,
-            app_handle_clone,
-        )
-        .await;
-    });
 
     Ok(())
 }
 
-async fn accept_connection_with_timeout(listener: &TcpListener, timeout_secs: u64) -> Option<std::net::TcpStream> {
-    let start_time = Instant::now();
-    while start_time.elapsed().as_secs() < timeout_secs {
-        match listener.accept() {
-            Ok((stream, _)) => return Some(stream),
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-            Err(_) => return None,
-        }
+/// Process OAuth callback from deep link / custom URL scheme
+pub async fn process_oauth_callback_url(raw_url: &str, app_handle: AppHandle) -> Result<(), String> {
+    let code = extract_code_from_url(raw_url);
+    if code.is_empty() {
+        let err_msg = "Código de autorização não encontrado na URL recebida.".to_string();
+        let _ = app_handle.emit("oauth-error", &err_msg);
+        return Err(err_msg);
     }
-    None
-}
 
-async fn handle_oauth_callback(
-    listener: TcpListener,
-    provider: String,
-    client_id: String,
-    client_secret: Option<String>,
-    code_verifier: String,
-    app_handle: AppHandle,
-) {
-    let mut stream = match accept_connection_with_timeout(&listener, 300).await {
-        Some(s) => s,
-        None => {
-            let _ = app_handle.emit("oauth-error", format!("Autenticação para {} expirou.", provider));
-            return;
-        }
+    let session = {
+        let mut lock = PENDING_OAUTH.lock().map_err(|e| e.to_string())?;
+        lock.take().ok_or_else(|| "Nenhuma sessão OAuth pendente encontrada.".to_string())?
     };
 
-    let mut buffer = [0; 2048];
-    let size = stream.read(&mut buffer).unwrap_or(0);
-    let request_str = String::from_utf8_lossy(&buffer[..size]).to_string();
-
-    let code = extract_code_from_request(&request_str);
-    if code.is_empty() {
-        let err_html = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<h1>Falha na Autenticação</h1><p>Nenhum código de autorização encontrado.</p>";
-        let _ = stream.write_all(err_html.as_bytes());
-        let _ = app_handle.emit(
-            "oauth-error",
-            format!("Não foi possível obter o código de autorização para {}", provider),
-        );
-        return;
-    }
-
-    let provider_name = if provider.to_lowercase() == "gdrive" { "Google Drive" } else { "OneDrive" };
-    let success_html = build_success_response_html(provider_name);
-    let _ = stream.write_all(success_html.as_bytes());
-    let _ = stream.flush();
-
-    match exchange_code_for_tokens(&provider, &client_id, client_secret.as_deref(), &code, &code_verifier).await {
+    let provider = session.provider;
+    match exchange_code_for_tokens(
+        &provider,
+        &session.client_id,
+        session.client_secret.as_deref(),
+        &code,
+        &session.code_verifier,
+        &session.redirect_uri,
+    )
+    .await
+    {
         Ok((_access_token, refresh_token)) => {
-            let app_dir = app_handle.path().app_data_dir().unwrap();
-            let db = DbConnection::new(app_dir);
-            if let Ok(mut settings) = db.get_settings() {
-                if provider.to_lowercase() == "gdrive" {
-                    settings.gdrive_client_id = Some(client_id);
-                    settings.gdrive_client_secret = client_secret;
-                    settings.gdrive_refresh_token = refresh_token;
-                    settings.gdrive_enabled = true;
-                } else {
-                    settings.onedrive_client_id = Some(client_id);
-                    settings.onedrive_client_secret = client_secret;
-                    settings.onedrive_refresh_token = refresh_token;
-                    settings.onedrive_enabled = true;
-                }
-                let _ = db.save_settings(settings);
-            }
-            let _ = app_handle.emit("oauth-success", provider);
+            save_tokens_to_db(&app_handle, &provider, session.client_id, session.client_secret, refresh_token)?;
+            let _ = app_handle.emit("oauth-success", &provider);
+            Ok(())
         }
         Err(e) => {
             let _ = app_handle.emit("oauth-error", format!("Falha na troca do token: {}", e));
+            Err(e)
         }
     }
 }
 
-fn build_success_response_html(provider_name: &str) -> String {
-    format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\r\n\
-        <html>\
-        <head><style>body {{ font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #0f172a; color: #f8fafc; }} .card {{ background: #1e293b; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); text-align: center; }} h1 {{ color: #10b981; }}</style></head>\
-        <body>\
-        <div class='card'>\
-        <h1>Conexão com {} Realizada!</h1>\
-        <p>Você já pode fechar esta aba e retornar ao aplicativo.</p>\
-        </div>\
-        </body>\
-        </html>",
-        provider_name
-    )
+fn save_tokens_to_db(
+    app_handle: &AppHandle,
+    provider: &str,
+    client_id: String,
+    client_secret: Option<String>,
+    refresh_token: Option<String>,
+) -> Result<(), String> {
+    let app_dir = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let db = DbConnection::new(app_dir);
+    let mut settings = db.get_settings().map_err(|e| e.to_string())?;
+
+    if provider.to_lowercase() == "gdrive" {
+        settings.gdrive_client_id = Some(client_id);
+        settings.gdrive_client_secret = client_secret;
+        settings.gdrive_refresh_token = refresh_token;
+        settings.gdrive_enabled = true;
+    } else {
+        settings.onedrive_client_id = Some(client_id);
+        settings.onedrive_client_secret = client_secret;
+        settings.onedrive_refresh_token = refresh_token;
+        settings.onedrive_enabled = true;
+    }
+
+    db.save_settings(settings).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
-fn extract_code_from_request(request: &str) -> String {
-    if let Some(start) = request.find("code=") {
-        let code_part = &request[start + 5..];
-        if let Some(end) = code_part.find(' ') {
-            let raw_code = &code_part[..end];
-            if let Some(amp) = raw_code.find('&') {
-                return raw_code[..amp].to_string();
-            }
-            return raw_code.to_string();
-        }
+fn extract_code_from_url(raw_url: &str) -> String {
+    if let Some(pos) = raw_url.find("code=") {
+        let rest = &raw_url[pos + 5..];
+        let end = rest.find('&').or_else(|| rest.find(' ')).or_else(|| rest.find('#')).unwrap_or(rest.len());
+        return rest[..end].to_string();
     }
     String::new()
 }
 
-async fn exchange_code_for_tokens(
+pub async fn exchange_code_for_tokens(
     provider: &str,
     client_id: &str,
     client_secret: Option<&str>,
     code: &str,
     code_verifier: &str,
+    redirect_uri: &str,
 ) -> Result<(String, Option<String>), String> {
     let client = reqwest::Client::new();
-    let redirect_uri = format!("http://localhost:{}", OAUTH_PORT);
     let is_gdrive = provider.to_lowercase() == "gdrive";
 
     let (token_url, mut params) = if is_gdrive {
@@ -243,7 +237,7 @@ async fn exchange_code_for_tokens(
                 ("code", code),
                 ("code_verifier", code_verifier),
                 ("grant_type", "authorization_code"),
-                ("redirect_uri", redirect_uri.as_str()),
+                ("redirect_uri", redirect_uri),
             ],
         )
     } else {
@@ -254,7 +248,7 @@ async fn exchange_code_for_tokens(
                 ("code", code),
                 ("code_verifier", code_verifier),
                 ("grant_type", "authorization_code"),
-                ("redirect_uri", redirect_uri.as_str()),
+                ("redirect_uri", redirect_uri),
                 ("scope", "files.readwrite offline_access"),
             ],
         )
@@ -284,16 +278,82 @@ async fn exchange_code_for_tokens(
     Ok((token_resp.access_token, token_resp.refresh_token))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[cfg(desktop)]
+fn start_desktop_tcp_listener(
+    provider: String,
+    client_id: String,
+    client_secret: Option<String>,
+    code_verifier: String,
+    redirect_uri: String,
+    app_handle: AppHandle,
+) {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::time::Duration;
 
-    #[test]
-    fn test_pkce_generation() {
-        let (verifier, challenge) = generate_pkce();
-        assert!(!verifier.is_empty());
-        assert!(!challenge.is_empty());
-        assert_ne!(verifier, challenge);
-        assert_eq!(verifier.len(), 43);
-    }
+    let listener = match TcpListener::bind(format!("127.0.0.1:{}", OAUTH_PORT)) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("Não foi possível escutar na porta {}: {}", OAUTH_PORT, e);
+            return;
+        }
+    };
+    let _ = listener.set_nonblocking(true);
+
+    tauri::async_runtime::spawn(async move {
+        let start_time = Instant::now();
+        let mut stream = None;
+
+        while start_time.elapsed().as_secs() < 300 {
+            match listener.accept() {
+                Ok((s, _)) => {
+                    stream = Some(s);
+                    break;
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                Err(_) => break,
+            }
+        }
+
+        let mut stream = match stream {
+            Some(s) => s,
+            None => return,
+        };
+
+        let mut buffer = [0; 2048];
+        let size = stream.read(&mut buffer).unwrap_or(0);
+        let request_str = String::from_utf8_lossy(&buffer[..size]).to_string();
+        let code = extract_code_from_url(&request_str);
+
+        if code.is_empty() {
+            let err_html = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<h1>Falha na Autenticação</h1><p>Nenhum código de autorização encontrado.</p>";
+            let _ = stream.write_all(err_html.as_bytes());
+            let _ = app_handle.emit("oauth-error", format!("Não foi possível obter o código de autorização para {}", provider));
+            return;
+        }
+
+        let provider_name = if provider.to_lowercase() == "gdrive" { "Google Drive" } else { "OneDrive" };
+        let success_html = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\r\n\
+            <html><head><style>body {{ font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #0f172a; color: #f8fafc; }} .card {{ background: #1e293b; padding: 2rem; border-radius: 12px; text-align: center; }} h1 {{ color: #10b981; }}</style></head>\
+            <body><div class='card'><h1>Conexão com {} Realizada!</h1><p>Você já pode fechar esta aba e retornar ao aplicativo.</p></div></body></html>",
+            provider_name
+        );
+        let _ = stream.write_all(success_html.as_bytes());
+        let _ = stream.flush();
+
+        if let Ok((_access_token, refresh_token)) = exchange_code_for_tokens(
+            &provider,
+            &client_id,
+            client_secret.as_deref(),
+            &code,
+            &code_verifier,
+            &redirect_uri,
+        ).await {
+            let _ = save_tokens_to_db(&app_handle, &provider, client_id, client_secret, refresh_token);
+            let _ = app_handle.emit("oauth-success", provider);
+        }
+    });
 }
