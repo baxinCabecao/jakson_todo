@@ -2,7 +2,7 @@ use crate::backup::gdrive::{get_gdrive_backup_info, refresh_gdrive_access_token,
 use crate::backup::oauth::{get_effective_gdrive_client_id, get_effective_onedrive_client_id};
 use crate::backup::onedrive::{get_onedrive_backup_info, refresh_onedrive_access_token, upload_to_onedrive};
 use crate::backup::types::{BackupReport, BackupStatus, CloudBackupsCheck, GDriveListResponse};
-use crate::db::AppSettings;
+use crate::db::{AppSettings, DbConnection};
 use chrono::{DateTime, Utc};
 use std::fs;
 use std::path::PathBuf;
@@ -16,8 +16,23 @@ pub async fn run_backup_to_clouds(
         return Err("O arquivo de banco de dados não existe localmente.".to_string());
     }
 
-    let db_bytes = fs::read(&db_path)
-        .map_err(|e| format!("Falha ao ler o banco de dados local: {}", e))?;
+    // Prepare sanitized database copy for cloud upload (strips device-specific OAuth refresh tokens)
+    let db_bytes = {
+        let temp_upload_path = db_path.with_extension("upload_temp.db");
+        if fs::copy(&db_path, &temp_upload_path).is_ok() {
+            if let Ok(conn) = rusqlite::Connection::open(&temp_upload_path) {
+                let _ = conn.execute(
+                    "UPDATE settings SET value = '' WHERE key IN ('gdrive_refresh_token', 'onedrive_refresh_token', 'gdrive_client_secret', 'onedrive_client_secret')",
+                    [],
+                );
+            }
+            let bytes = fs::read(&temp_upload_path).unwrap_or_else(|_| fs::read(&db_path).unwrap_or_default());
+            let _ = fs::remove_file(&temp_upload_path);
+            bytes
+        } else {
+            fs::read(&db_path).map_err(|e| format!("Falha ao ler o banco de dados local: {}", e))?
+        }
+    };
 
     let mut onedrive_status = BackupStatus {
         provider: "OneDrive".to_string(),
@@ -36,13 +51,12 @@ pub async fn run_backup_to_clouds(
     // 1. Run OneDrive Backup if enabled
     if settings.onedrive_enabled {
         if let Some(ref ref_token) = settings.onedrive_refresh_token {
-            let client_id = get_effective_onedrive_client_id(settings.onedrive_client_id.as_deref());
-            let client_secret = settings.onedrive_client_secret.as_deref();
+            let client_id = get_effective_onedrive_client_id();
 
             if client_id.is_empty() {
                 onedrive_status.error_message = Some("Client ID do OneDrive não configurado.".to_string());
             } else {
-                match refresh_onedrive_access_token(&client_id, client_secret, ref_token).await {
+                match refresh_onedrive_access_token(&client_id, ref_token).await {
                     Ok(access_token) => match upload_to_onedrive(&access_token, db_bytes.clone()).await {
                         Ok(_) => onedrive_status.success = true,
                         Err(e) => onedrive_status.error_message = Some(e),
@@ -60,10 +74,9 @@ pub async fn run_backup_to_clouds(
     // 2. Run GDrive Backup if enabled
     if settings.gdrive_enabled {
         if let Some(ref ref_token) = settings.gdrive_refresh_token {
-            let client_id = get_effective_gdrive_client_id(settings.gdrive_client_id.as_deref());
-            let client_secret = settings.gdrive_client_secret.as_deref();
+            let client_id = get_effective_gdrive_client_id();
 
-            match refresh_gdrive_access_token(&client_id, client_secret, ref_token).await {
+            match refresh_gdrive_access_token(&client_id, ref_token).await {
                 Ok(access_token) => match upload_to_gdrive(&access_token, db_bytes.clone()).await {
                     Ok(_) => gdrive_status.success = true,
                     Err(e) => gdrive_status.error_message = Some(e),
@@ -167,10 +180,9 @@ pub async fn restore_db_from_cloud(
             .as_ref()
             .ok_or_else(|| "Conta Google Drive não conectada.".to_string())?;
 
-        let client_id = get_effective_gdrive_client_id(settings.gdrive_client_id.as_deref());
-        let client_secret = settings.gdrive_client_secret.as_deref();
+        let client_id = get_effective_gdrive_client_id();
 
-        let access_token = refresh_gdrive_access_token(&client_id, client_secret, refresh_token).await?;
+        let access_token = refresh_gdrive_access_token(&client_id, refresh_token).await?;
 
         // Search file in appDataFolder
         let search_url = "https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name='jakson_todo_backup.db' and trashed=false&fields=files(id)";
@@ -217,13 +229,12 @@ pub async fn restore_db_from_cloud(
             .as_ref()
             .ok_or_else(|| "Conta OneDrive não conectada.".to_string())?;
 
-        let client_id = get_effective_onedrive_client_id(settings.onedrive_client_id.as_deref());
+        let client_id = get_effective_onedrive_client_id();
         if client_id.is_empty() {
             return Err("Client ID do OneDrive não configurado.".to_string());
         }
 
-        let client_secret = settings.onedrive_client_secret.as_deref();
-        let access_token = refresh_onedrive_access_token(&client_id, client_secret, refresh_token).await?;
+        let access_token = refresh_onedrive_access_token(&client_id, refresh_token).await?;
 
         let download_url = "https://graph.microsoft.com/v1.0/me/drive/root:/jakson_todo_backup.db:/content";
         let download_res = client
@@ -254,6 +265,16 @@ pub async fn restore_db_from_cloud(
 
     fs::write(&db_path, db_bytes)
         .map_err(|e| format!("Falha ao salvar banco de dados local: {}", e))?;
+
+    // Crucial: preserve the current device's local settings and OAuth tokens!
+    // Restoring from another device (e.g. Desktop to Android or vice-versa)
+    // must NOT overwrite the local device's OAuth credentials with the remote ones.
+    let db = DbConnection::new(db_path.parent().unwrap().to_path_buf());
+    if let Err(e) = db.save_settings(settings) {
+        eprintln!("[Restore] Aviso: Falha ao preservar configurações locais no banco restaurado: {}", e);
+    } else {
+        println!("[Restore] Configurações e tokens locais preservados com sucesso após restauração.");
+    }
 
     Ok(())
 }

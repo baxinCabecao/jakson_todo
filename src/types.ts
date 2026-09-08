@@ -22,11 +22,9 @@ export interface Task {
 
 export interface AppSettings {
   onedrive_client_id?: string;
-  onedrive_client_secret?: string;
   onedrive_refresh_token?: string;
   onedrive_enabled: boolean;
   gdrive_client_id?: string;
-  gdrive_client_secret?: string;
   gdrive_refresh_token?: string;
   gdrive_enabled: boolean;
   backup_frequency_mins: number;

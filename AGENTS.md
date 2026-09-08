@@ -2,7 +2,11 @@
 
 Simple to do tool with back-up.
 
-Act as a senior full-stack developer when writing and maintaining the codebase. Follow best practices for clean, modular, and maintainable code. Adhere to the specified stack and technologies, ensuring a seamless integration between the React frontend and Tauri Rust backend. Implement robust error handling, input validation, and user-friendly UI/UX design. Prioritize performance optimization and security best practices throughout the development process.
+Act as a senior full-stack multiplatfor developer when writing and maintaining the codebase. Follow best practices for clean, modular, secure and maintainable code. Adhere to the specified stack and technologies, ensuring a seamless integration between the React frontend and Tauri Rust backend. Implement robust error handling, input validation, and user-friendly UI/UX design. Prioritize performance optimization and security best practices throughout the development process.
+
+Take care to not broke anything from one platform when working in features for another(like broke desktop while creating a Android feature).
+
+Aways aim for best pratics of multiplafotm development.
 
 ## 🚀 Stack & Technologies
 
@@ -11,6 +15,7 @@ Act as a senior full-stack developer when writing and maintaining the codebase. 
 - **Backend/Desktop wrapper**: Tauri (v2) in Rust.
 - **Local Database**: SQLite (via `rusqlite` with bundled compilation).
 - **Cloud Backup**: Integrated manual and automatic backup/restore with Google Drive & OneDrive (OAuth TCP listener on local port `59135`).
+- **Platforms**: Linux, Android, and future in Windows/iOS
 
 ---
 
@@ -52,6 +57,9 @@ Act as a senior full-stack developer when writing and maintaining the codebase. 
   - If building with full installers (deb, rpm): `npm run tauri build`
   - If building only the portable release binary: `export PATH="$HOME/.cargo/bin:$PATH" && cargo build --manifest-path src-tauri/Cargo.toml --release`
   *(Note: The `custom-protocol` feature must be enabled in `src-tauri/Cargo.toml` so static assets are bundled inside the executable, allowing it to run without a dev server.)*
+- **Build android**: `npm run android:build`
+- **Run android**: `npm run android:dev`
+- **Clean build artifacts**: `cargo clean`
 
 ## 🎨 Styling & UI Conventions
 

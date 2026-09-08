@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+*.apk
+
+# Environment Variables
+.env
+.env.*
+!.env.example

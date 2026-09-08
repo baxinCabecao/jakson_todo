@@ -1,4 +1,4 @@
-package com.f4613569.tauri_app
+package com.baxin.jaksontodo
 
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge

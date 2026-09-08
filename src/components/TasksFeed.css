@@ -14,9 +14,13 @@
   gap: 0.75rem;
 }
 
-@media (max-width: 600px) {
+@media (max-width: 768px) {
   .tasks-feed {
     flex-direction: column;
+  }
+  .tasks-column {
+    min-width: 100%;
+    width: 100%;
   }
 }
 

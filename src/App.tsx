@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
+import { onOpenUrl, getCurrent } from "@tauri-apps/plugin-deep-link";
+import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import { Plus, Menu } from "lucide-react";
 
 import "./App.css"; // CRITICAL: Import the layout styles!
@@ -22,7 +23,9 @@ function App() {
   // State
   const [tasks, setTasks] = useState<Task[]>([]);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
-    return localStorage.getItem("sidebar-collapsed") === "true";
+    const saved = localStorage.getItem("sidebar-collapsed");
+    if (saved !== null) return saved === "true";
+    return typeof window !== "undefined" && window.innerWidth <= 768;
   });
 
   const handleToggleSidebar = (collapsed: boolean) => {
@@ -94,15 +97,49 @@ function App() {
     });
 
     // Listen for OAuth deep link callbacks (Mobile & Desktop)
-    const unlistenDeepLink = onOpenUrl((urls) => {
-      for (const url of urls) {
-        if (url.includes("code=") || url.includes("error=")) {
-          invoke("handle_oauth_url", { url }).catch((err) => {
-            console.error("Erro ao processar callback OAuth via Deep Link:", err);
-          });
+    const handleDeepLinkUrl = async (url: string) => {
+      console.log("Deep link capturado:", url);
+      if (url.includes("code=") || url.includes("error=")) {
+        try {
+          await invoke("handle_oauth_url", { url });
+        } catch (err) {
+          console.error("Erro ao processar callback OAuth via Deep Link:", err);
         }
       }
+    };
+
+    // Check cold-start deep links
+    getCurrent()
+      .then((urls) => {
+        if (urls && urls.length > 0) {
+          for (const url of urls) {
+            handleDeepLinkUrl(url);
+          }
+        }
+      })
+      .catch((err) => {
+        console.error("Erro ao verificar getCurrent:", err);
+      });
+
+    // Listen for deep links while app is running
+    const unlistenDeepLink = onOpenUrl((urls) => {
+      for (const url of urls) {
+        handleDeepLinkUrl(url);
+      }
     });
+
+    // Request notification permissions for backup alerts (Android 13+ and Desktop)
+    const ensureNotificationPermission = async () => {
+      try {
+        const granted = await isPermissionGranted();
+        if (!granted) {
+          await requestPermission();
+        }
+      } catch (err) {
+        console.error("Erro ao verificar/solicitar permissão de notificação:", err);
+      }
+    };
+    ensureNotificationPermission();
 
     return () => {
       unlistenSuccess.then((f) => f());
@@ -145,10 +182,10 @@ function App() {
     setIsRestoring(true);
     try {
       await invoke("restore_backup", { provider });
-      alert("Banco de dados restaurado com sucesso do backup!");
+      alert("Banco de dados restaurado com sucesso! Suas tarefas e credenciais de nuvem locais foram sincronizadas.");
       setShowRestoreModal(false);
-      loadTasks();
-      loadSettings();
+      await loadTasks();
+      await loadSettings();
     } catch (e) {
       alert(`Erro ao restaurar backup: ${e}`);
     } finally {
@@ -159,9 +196,27 @@ function App() {
   const handleManualBackup = async () => {
     setIsBackingUp(true);
     try {
+      // Ensure permission so OS notification can show
+      try {
+        const granted = await isPermissionGranted();
+        if (!granted) {
+          await requestPermission();
+        }
+      } catch (err) {
+        console.error("Erro ao checar permissão de notificação:", err);
+      }
+
       const report = await invoke<any>("trigger_backup");
       setBackupReport(report);
-      loadSettings();
+      await loadSettings();
+
+      if (report.gdrive.enabled && !report.gdrive.success) {
+        alert(`Backup no Google Drive falhou: ${report.gdrive.error_message || "Erro desconhecido"}`);
+      } else if (report.onedrive.enabled && !report.onedrive.success) {
+        alert(`Backup no OneDrive falhou: ${report.onedrive.error_message || "Erro desconhecido"}`);
+      } else if (report.gdrive.success || report.onedrive.success) {
+        alert("Backup manual realizado com sucesso!");
+      }
     } catch (e) {
       alert(`Erro ao disparar backup: ${e}`);
     } finally {
@@ -373,17 +428,29 @@ function App() {
   };
 
   // Trigger Cloud Authorize flow
-  const handleConnectProvider = async (provider: "gdrive" | "onedrive", clientId?: string, clientSecret?: string) => {
+  const handleConnectProvider = async (provider: "gdrive" | "onedrive") => {
     try {
-      await invoke("start_oauth", {
-        provider,
-        clientId: clientId?.trim() || null,
-        clientSecret: clientSecret?.trim() || null,
-      });
+      await invoke("start_oauth", { provider });
     } catch (e) {
       alert(`Erro ao iniciar fluxo OAuth: ${e}`);
     }
   };
+
+  // Disconnect Cloud Provider
+  const handleDisconnectProvider = async (provider: "gdrive" | "onedrive") => {
+    const providerName = provider === "gdrive" ? "Google Drive" : "OneDrive";
+    if (!confirm(`Deseja realmente desconectar a conta do ${providerName}?`)) {
+      return;
+    }
+    try {
+      await invoke("disconnect_provider", { provider });
+      await loadSettings();
+      alert(`Conta do ${providerName} desconectada com sucesso.`);
+    } catch (e) {
+      alert(`Erro ao desconectar ${providerName}: ${e}`);
+    }
+  };
+
 
   return (
     <div className={`app-container ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}>
@@ -399,6 +466,15 @@ function App() {
         isCollapsed={isSidebarCollapsed}
         setIsCollapsed={handleToggleSidebar}
       />
+
+      {/* Backdrop overlay for mobile drawer */}
+      {!isSidebarCollapsed && (
+        <div
+          className="sidebar-backdrop"
+          onClick={() => handleToggleSidebar(true)}
+          title="Fechar Menu"
+        />
+      )}
 
       {/* Main Panel */}
       <main className="main-content">
@@ -479,6 +555,7 @@ function App() {
             settings={settings}
             onSaveSettings={handleSaveSettings}
             onConnectProvider={handleConnectProvider}
+            onDisconnectProvider={handleDisconnectProvider}
             onRestoreBackup={handleRestoreBackup}
             isRestoring={isRestoring}
             isBackingUp={isBackingUp}

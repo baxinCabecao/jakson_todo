@@ -1,4 +1,4 @@
-use crate::backup::oauth::get_effective_gdrive_client_id;
+use crate::backup::oauth::{get_effective_gdrive_client_id, get_effective_gdrive_client_secret};
 use crate::backup::types::{GDriveListResponse, RemoteBackupInfo, TokenResponse};
 use crate::db::AppSettings;
 
@@ -8,7 +8,6 @@ const APPDATA_FOLDER: &str = "appDataFolder";
 /// Refresh Google access token (supports PKCE with optional client_secret)
 pub async fn refresh_gdrive_access_token(
     client_id: &str,
-    client_secret: Option<&str>,
     refresh_token: &str,
 ) -> Result<String, String> {
     let client = reqwest::Client::new();
@@ -18,10 +17,8 @@ pub async fn refresh_gdrive_access_token(
         ("grant_type", "refresh_token"),
     ];
 
-    if let Some(sec) = client_secret {
-        if !sec.is_empty() {
-            params.push(("client_secret", sec));
-        }
+    if let Some(sec) = get_effective_gdrive_client_secret() {
+        params.push(("client_secret", sec));
     }
 
     let res = client
@@ -91,7 +88,7 @@ pub async fn upload_to_gdrive(
         // Create new file inside appDataFolder (multipart)
         let metadata = serde_json::json!({
             "name": BACKUP_FILENAME,
-            "description": "Backup de tarefas do Jakson Todo",
+            "description": "Backup de tarefas do Jakson ToDo",
             "parents": [APPDATA_FOLDER]
         });
 
@@ -145,10 +142,9 @@ pub async fn get_gdrive_backup_info(
         _ => return info,
     };
 
-    let client_id = get_effective_gdrive_client_id(settings.gdrive_client_id.as_deref());
-    let client_secret = settings.gdrive_client_secret.as_deref();
+    let client_id = get_effective_gdrive_client_id();
 
-    let access_token = match refresh_gdrive_access_token(&client_id, client_secret, refresh_token).await {
+    let access_token = match refresh_gdrive_access_token(&client_id, refresh_token).await {
         Ok(token) => token,
         Err(_) => return info,
     };

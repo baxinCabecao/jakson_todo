@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from "react";
-import { Cloud, Clock, RefreshCw, Database, ShieldCheck, ChevronDown, ChevronUp } from "lucide-react";
+import { Cloud, Clock, RefreshCw, Database, ShieldCheck } from "lucide-react";
 import { AppSettings } from "../types";
 import "./Settings.css";
 
 interface SettingsProps {
   settings: AppSettings;
   onSaveSettings: (settings: AppSettings) => void;
-  onConnectProvider: (provider: "gdrive" | "onedrive", clientId?: string, clientSecret?: string) => void;
+  onConnectProvider: (provider: "gdrive" | "onedrive") => void;
+  onDisconnectProvider: (provider: "gdrive" | "onedrive") => void;
   onRestoreBackup: (provider: string) => void;
   isRestoring: boolean;
   isBackingUp: boolean;
@@ -17,29 +18,32 @@ interface SettingsProps {
 interface ProviderCardProps {
   name: string;
   provider: "gdrive" | "onedrive";
+  isConnected: boolean;
   enabled: boolean;
   onToggle: (enabled: boolean) => void;
   onConnect: () => void;
-  clientId: string;
-  setClientId: (val: string) => void;
-  clientSecret: string;
-  setClientSecret: (val: string) => void;
+  onDisconnect: () => void;
   isPkce?: boolean;
 }
 
 const ProviderSection: React.FC<ProviderCardProps> = ({
   name,
-  provider,
+  isConnected,
   enabled,
   onToggle,
   onConnect,
-  clientId,
-  setClientId,
-  clientSecret,
-  setClientSecret,
+  onDisconnect,
   isPkce = false,
 }) => {
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const getBadgeClass = () => {
+    if (!isConnected) return "disconnected";
+    return enabled ? "connected" : "paused";
+  };
+
+  const getBadgeText = () => {
+    if (!isConnected) return "Não Conectado";
+    return enabled ? "Conectado e Ativo" : "Conectado (Backup Pausado)";
+  };
 
   return (
     <section className="settings-section-card">
@@ -52,56 +56,51 @@ const ProviderSection: React.FC<ProviderCardProps> = ({
         <div className="provider-info-box">
           <ShieldCheck size={18} className="text-emerald" />
           <span>
-            Autenticação segura via <strong>PKCE</strong> (sem segredo exposto) e armazenamento isolado na pasta interna (<strong>appDataFolder</strong>).
+            Autenticação segura e direta via <strong>PKCE</strong> com armazenamento isolado na pasta interna (<strong>appDataFolder</strong>).
           </span>
         </div>
       )}
 
       <div className="provider-status-row">
-        <div className={`status-badge ${enabled ? "connected" : "disconnected"}`}>
-          {enabled ? "Habilitado e Conectado" : "Não Conectado"}
+        <div className={`status-badge ${getBadgeClass()}`}>
+          {getBadgeText()}
         </div>
-        <button type="button" className="btn-secondary" onClick={onConnect}>
-          {enabled ? `Reconectar ${name}` : `Conectar ${name}`}
-        </button>
-        <label className="toggle-backup-label">
-          <input type="checkbox" checked={enabled} onChange={(e) => onToggle(e.target.checked)} />
+
+        {isConnected ? (
+          <>
+            <button type="button" className="btn-secondary" onClick={onConnect}>
+              Reconectar {name}
+            </button>
+            <button type="button" className="btn-secondary danger-text" onClick={onDisconnect}>
+              Desconectar
+            </button>
+          </>
+        ) : (
+          <button type="button" className="btn-primary" onClick={onConnect}>
+            Conectar {name}
+          </button>
+        )}
+
+        <label className={`toggle-backup-label ${!isConnected ? "disabled" : ""}`}>
+          <input
+            type="checkbox"
+            checked={enabled && isConnected}
+            disabled={!isConnected}
+            onChange={(e) => {
+              if (!isConnected) {
+                alert(`Conecte sua conta do ${name} primeiro antes de ativar o backup automático.`);
+                return;
+              }
+              onToggle(e.target.checked);
+            }}
+          />
           <span>Ativar Backup Automático</span>
         </label>
       </div>
-
-      <div className="advanced-toggle-wrapper">
-        <button
-          type="button"
-          className="btn-text-toggle"
-          onClick={() => setShowAdvanced(!showAdvanced)}
-        >
-          {showAdvanced ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-          <span>Configurações Avançadas (Chaves Personalizadas)</span>
-        </button>
-      </div>
-
-      {showAdvanced && (
-        <div className="form-group-row advanced-fields">
-          <div className="form-group-field">
-            <label>Client ID {provider === "gdrive" ? "(Opcional - compilado no Rust)" : ""}</label>
-            <input
-              type="text"
-              placeholder={provider === "gdrive" ? "Padrão embutido no backend" : "Ex: 5d1345a-cf2a-43d2"}
-              value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
-            />
-          </div>
-          <div className="form-group-field">
-            <label>Client Secret (Opcional)</label>
-            <input
-              type="password"
-              placeholder={provider === "gdrive" ? "Não obrigatório com PKCE" : "••••••••••••••••"}
-              value={clientSecret}
-              onChange={(e) => setClientSecret(e.target.value)}
-            />
-          </div>
-        </div>
+      {!isConnected && (
+        <p className="field-tip mt-1">
+          * Conecte sua conta do {name} acima para liberar o backup em nuvem.
+        </p>
       )}
     </section>
   );
@@ -111,41 +110,33 @@ export const Settings: React.FC<SettingsProps> = ({
   settings,
   onSaveSettings,
   onConnectProvider,
+  onDisconnectProvider,
   onRestoreBackup,
   isRestoring,
   isBackingUp,
   backupReport,
   onManualBackup,
 }) => {
-  const [gdriveClientId, setGdriveClientId] = useState("");
-  const [gdriveClientSecret, setGdriveClientSecret] = useState("");
-  const [onedriveClientId, setOnedriveClientId] = useState("");
-  const [onedriveClientSecret, setOnedriveClientSecret] = useState("");
   const [backupFrequencyMins, setBackupFrequencyMins] = useState(60);
   const [gdriveEnabled, setGdriveEnabled] = useState(false);
   const [onedriveEnabled, setOnedriveEnabled] = useState(false);
 
+  const isGdriveConnected = Boolean(settings.gdrive_refresh_token);
+  const isOnedriveConnected = Boolean(settings.onedrive_refresh_token);
+
   useEffect(() => {
-    setGdriveClientId(settings.gdrive_client_id || "");
-    setGdriveClientSecret(settings.gdrive_client_secret || "");
-    setOnedriveClientId(settings.onedrive_client_id || "");
-    setOnedriveClientSecret(settings.onedrive_client_secret || "");
     setBackupFrequencyMins(settings.backup_frequency_mins);
-    setGdriveEnabled(settings.gdrive_enabled);
-    setOnedriveEnabled(settings.onedrive_enabled);
+    setGdriveEnabled(settings.gdrive_enabled && Boolean(settings.gdrive_refresh_token));
+    setOnedriveEnabled(settings.onedrive_enabled && Boolean(settings.onedrive_refresh_token));
   }, [settings]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSaveSettings({
       ...settings,
-      gdrive_client_id: gdriveClientId.trim() || undefined,
-      gdrive_client_secret: gdriveClientSecret.trim() || undefined,
-      onedrive_client_id: onedriveClientId.trim() || undefined,
-      onedrive_client_secret: onedriveClientSecret.trim() || undefined,
       backup_frequency_mins: backupFrequencyMins,
-      gdrive_enabled: gdriveEnabled,
-      onedrive_enabled: onedriveEnabled,
+      gdrive_enabled: gdriveEnabled && isGdriveConnected,
+      onedrive_enabled: onedriveEnabled && isOnedriveConnected,
     });
   };
 
@@ -162,26 +153,22 @@ export const Settings: React.FC<SettingsProps> = ({
         <ProviderSection
           name="Google Drive"
           provider="gdrive"
+          isConnected={isGdriveConnected}
           enabled={gdriveEnabled}
           onToggle={setGdriveEnabled}
-          onConnect={() => onConnectProvider("gdrive", gdriveClientId, gdriveClientSecret)}
-          clientId={gdriveClientId}
-          setClientId={setGdriveClientId}
-          clientSecret={gdriveClientSecret}
-          setClientSecret={setGdriveClientSecret}
+          onConnect={() => onConnectProvider("gdrive")}
+          onDisconnect={() => onDisconnectProvider("gdrive")}
           isPkce
         />
 
         <ProviderSection
           name="OneDrive"
           provider="onedrive"
+          isConnected={isOnedriveConnected}
           enabled={onedriveEnabled}
           onToggle={setOnedriveEnabled}
-          onConnect={() => onConnectProvider("onedrive", onedriveClientId, onedriveClientSecret)}
-          clientId={onedriveClientId}
-          setClientId={setOnedriveClientId}
-          clientSecret={onedriveClientSecret}
-          setClientSecret={setOnedriveClientSecret}
+          onConnect={() => onConnectProvider("onedrive")}
+          onDisconnect={() => onDisconnectProvider("onedrive")}
         />
 
         {/* Auto Backup Options */}

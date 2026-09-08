@@ -25,46 +25,53 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isCollapsed,
   setIsCollapsed,
 }) => {
+  const handleNavClick = (tab: "tasks" | "dashboard" | "settings" | "eisenhower") => {
+    setActiveTab(tab);
+    if (window.innerWidth <= 768) {
+      setIsCollapsed(true);
+    }
+  };
+
   return (
     <aside className={`sidebar ${isCollapsed ? "collapsed" : ""}`}>
       <div className="sidebar-brand">
         <ListTodo className="sidebar-logo-icon" size={24} />
-        <h2>Jakson Todo</h2>
+        <h2>Jakson ToDo</h2>
         <button
           type="button"
           className="btn-sidebar-collapse"
           onClick={() => setIsCollapsed(true)}
-          title="Esconder Menu"
+          title="Fechar Menu"
         >
-          <ChevronLeft size={18} />
+          <ChevronLeft size={22} />
         </button>
       </div>
 
       <nav className="sidebar-nav">
         <button
           className={`nav-item ${activeTab === "tasks" ? "active" : ""}`}
-          onClick={() => setActiveTab("tasks")}
+          onClick={() => handleNavClick("tasks")}
         >
           <CheckSquare size={18} />
           <span>Minhas Tarefas</span>
         </button>
         <button
           className={`nav-item ${activeTab === "eisenhower" ? "active" : ""}`}
-          onClick={() => setActiveTab("eisenhower")}
+          onClick={() => handleNavClick("eisenhower")}
         >
           <Grid size={18} />
           <span>Matriz Eisenhower</span>
         </button>
         <button
           className={`nav-item ${activeTab === "dashboard" ? "active" : ""}`}
-          onClick={() => setActiveTab("dashboard")}
+          onClick={() => handleNavClick("dashboard")}
         >
           <Briefcase size={18} />
           <span>Dashboard</span>
         </button>
         <button
           className={`nav-item ${activeTab === "settings" ? "active" : ""}`}
-          onClick={() => setActiveTab("settings")}
+          onClick={() => handleNavClick("settings")}
         >
           <SettingsIcon size={18} />
           <span>Configurações</span>

@@ -109,7 +109,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
             <label>Descrição (Opcional)</label>
             <textarea
               placeholder="Insira detalhes adicionais sobre esta tarefa..."
-              rows={2}
+              rows={4}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />

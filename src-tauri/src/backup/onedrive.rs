@@ -5,21 +5,14 @@ use crate::db::AppSettings;
 /// Refresh OneDrive access token
 pub async fn refresh_onedrive_access_token(
     client_id: &str,
-    client_secret: Option<&str>,
     refresh_token: &str,
 ) -> Result<String, String> {
     let client = reqwest::Client::new();
-    let mut params = vec![
+    let params = vec![
         ("client_id", client_id),
         ("refresh_token", refresh_token),
         ("grant_type", "refresh_token"),
     ];
-
-    if let Some(sec) = client_secret {
-        if !sec.is_empty() {
-            params.push(("client_secret", sec));
-        }
-    }
 
     let res = client
         .post("https://login.microsoftonline.com/common/oauth2/v2.0/token")
@@ -89,14 +82,12 @@ pub async fn get_onedrive_backup_info(
         _ => return info,
     };
 
-    let client_id = get_effective_onedrive_client_id(settings.onedrive_client_id.as_deref());
+    let client_id = get_effective_onedrive_client_id();
     if client_id.is_empty() {
         return info;
     }
 
-    let client_secret = settings.onedrive_client_secret.as_deref();
-
-    if let Ok(access_token) = refresh_onedrive_access_token(&client_id, client_secret, refresh_token).await {
+    if let Ok(access_token) = refresh_onedrive_access_token(&client_id, refresh_token).await {
         let client = reqwest::Client::new();
         let url = "https://graph.microsoft.com/v1.0/me/drive/root:/jakson_todo_backup.db";
 

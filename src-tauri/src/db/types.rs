@@ -25,16 +25,30 @@ pub struct Subtask {
     pub created_at: String,
 }
 
+fn default_backup_frequency() -> i64 {
+    60
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
+    #[serde(default)]
     pub onedrive_client_id: Option<String>,
+    #[serde(default)]
     pub onedrive_client_secret: Option<String>,
+    #[serde(default)]
     pub onedrive_refresh_token: Option<String>,
+    #[serde(default)]
     pub onedrive_enabled: bool,
+    #[serde(default)]
     pub gdrive_client_id: Option<String>,
+    #[serde(default)]
     pub gdrive_client_secret: Option<String>,
+    #[serde(default)]
     pub gdrive_refresh_token: Option<String>,
+    #[serde(default)]
     pub gdrive_enabled: bool,
+    #[serde(default = "default_backup_frequency")]
     pub backup_frequency_mins: i64,
+    #[serde(default)]
     pub last_backup_time: Option<String>,
 }

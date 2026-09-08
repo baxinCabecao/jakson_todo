@@ -11,7 +11,7 @@ pub fn setup_systray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>>
     let app_handle = app.handle();
 
     // Create tray menu items
-    let open_item = MenuItem::with_id(app_handle, "open", "Abrir Jakson Todo", true, None::<&str>)?;
+    let open_item = MenuItem::with_id(app_handle, "open", "Abrir Jakson ToDo", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app_handle, "quit", "Sair", true, None::<&str>)?;
     
     let menu = Menu::with_items(app_handle, &[&open_item, &quit_item])?;

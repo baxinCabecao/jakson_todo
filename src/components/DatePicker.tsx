@@ -187,6 +187,15 @@ export const DatePicker: React.FC<DatePickerProps> = ({
     setShowCalendar(false);
   };
 
+  const handleSelectToday = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const today = new Date();
+    const pad = (n: number) => n.toString().padStart(2, "0");
+    const todayStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+    onChange(todayStr);
+    setShowCalendar(false);
+  };
+
   const handleClearDate = (e: React.MouseEvent) => {
     e.preventDefault();
     onChange(undefined);
@@ -230,6 +239,11 @@ export const DatePicker: React.FC<DatePickerProps> = ({
 
     return cells;
   };
+
+  const now = new Date();
+  const todayDay = now.getDate();
+  const todayMonth = now.getMonth();
+  const todayYear = now.getFullYear();
 
   return (
     <div className="datepicker-container" ref={datepickerRef}>
@@ -283,13 +297,14 @@ export const DatePicker: React.FC<DatePickerProps> = ({
               const pad = (n: number) => n.toString().padStart(2, "0");
               const cellDateStr = `${cell.year}-${pad(cell.month + 1)}-${pad(cell.day)}`;
               const isSelected = value === cellDateStr;
+              const isToday = cell.day === todayDay && cell.month === todayMonth && cell.year === todayYear;
               return (
                 <button
                   key={idx}
                   type="button"
                   className={`datepicker-day-btn ${cell.isCurrentMonth ? "current" : "other"} ${
-                    isSelected ? "selected" : ""
-                  }`}
+                    isToday ? "today" : ""
+                  } ${isSelected ? "selected" : ""}`}
                   onClick={(e) => handleSelectDate(cell.day, cell.month, cell.year, e)}
                 >
                   {cell.day}
@@ -298,6 +313,9 @@ export const DatePicker: React.FC<DatePickerProps> = ({
             })}
           </div>
           <div className="datepicker-footer">
+            <button type="button" className="btn-datepicker-today" onClick={handleSelectToday}>
+              Hoje
+            </button>
             <button type="button" className="btn-datepicker-clear" onClick={handleClearDate}>
               Sem Vencimento
             </button>

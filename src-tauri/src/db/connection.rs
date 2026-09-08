@@ -14,6 +14,23 @@ impl DbConnection {
             let _ = fs::create_dir_all(&app_dir);
         }
         let db_path = app_dir.join("todo.db");
+
+        // Migration helper: If new db doesn't exist yet, check if old package directory exists and migrate
+        if !db_path.exists() {
+            if let Some(parent) = app_dir.parent() {
+                let legacy_dirs = [
+                    parent.join("com.f4613569.tauri-app").join("todo.db"),
+                    parent.join("tauri-app").join("todo.db"),
+                ];
+                for legacy_db in &legacy_dirs {
+                    if legacy_db.exists() {
+                        let _ = fs::copy(legacy_db, &db_path);
+                        break;
+                    }
+                }
+            }
+        }
+
         DbConnection { path: db_path }
     }
 

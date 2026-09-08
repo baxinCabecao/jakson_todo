@@ -74,17 +74,31 @@ async fn trigger_backup(app_handle: AppHandle, state: State<'_, AppState>) -> Re
 #[tauri::command]
 async fn start_oauth(
     provider: String,
-    client_id: Option<String>,
-    client_secret: Option<String>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
-    crate::backup::start_oauth_flow(provider, client_id, client_secret, app_handle).await
+    crate::backup::start_oauth_flow(provider, app_handle).await
 }
 
 #[tauri::command]
 async fn handle_oauth_url(url: String, app_handle: AppHandle) -> Result<(), String> {
     crate::backup::process_oauth_callback_url(&url, app_handle).await
 }
+
+#[tauri::command]
+fn disconnect_provider(provider: String, state: State<'_, AppState>) -> Result<(), String> {
+    let db = DbConnection::new(state.db_path.parent().unwrap().to_path_buf());
+    let mut settings = db.get_settings().map_err(|e| e.to_string())?;
+    if provider.to_lowercase() == "gdrive" {
+        settings.gdrive_refresh_token = None;
+        settings.gdrive_enabled = false;
+    } else {
+        settings.onedrive_refresh_token = None;
+        settings.onedrive_enabled = false;
+    }
+    db.save_settings(settings).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 
 #[tauri::command]
 async fn check_backups(state: State<'_, AppState>) -> Result<CloudBackupsCheck, String> {
@@ -128,10 +142,14 @@ fn show_backup_notification_manual(app_handle: &AppHandle, report: &BackupReport
         messages.join(". ")
     };
 
-    let _ = app_handle.notification().builder()
-        .title("Jakson Todo - Backup Manual")
+    let res = app_handle.notification().builder()
+        .title("Jakson ToDo - Backup Manual")
         .body(&body)
         .show();
+
+    if let Err(e) = res {
+        eprintln!("[Notification] Erro ao exibir notificação de backup: {}", e);
+    }
 }
 
 /// Helper function to show notifications for background auto backup errors
@@ -213,7 +231,7 @@ fn check_startup_tasks_and_notify(app_handle: &AppHandle, db_path: PathBuf) {
     }
 
     if overdue_count > 0 || today_count > 0 || tomorrow_count > 0 {
-        let title = "Jakson Todo - Resumo de Tarefas".to_string();
+        let title = "Jakson ToDo - Resumo de Tarefas".to_string();
         let body = format!(
             "Atrasadas: {}. Vencem hoje: {}. Vencem amanhã: {}.",
             overdue_count, today_count, tomorrow_count
@@ -320,6 +338,7 @@ pub fn run() {
             trigger_backup,
             start_oauth,
             handle_oauth_url,
+            disconnect_provider,
             check_backups,
             restore_backup
         ])

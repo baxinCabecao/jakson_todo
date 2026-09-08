@@ -1,18 +1,21 @@
 /* Sidebar Styling */
 .sidebar {
   width: 280px;
-  background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border-right: 1px solid var(--border-color);
   padding: 2rem 1.5rem;
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
   position: sticky;
   top: 0;
-  transition: width var(--transition-normal), padding var(--transition-normal), opacity var(--transition-normal), border-color var(--transition-normal);
-  overflow: hidden;
+  transition: width var(--transition-normal), opacity var(--transition-normal), transform var(--transition-normal);
+  overflow-y: auto;
+  overflow-x: hidden;
+  z-index: 1000;
 }
 
 .sidebar-collapsed .sidebar {
@@ -21,6 +24,36 @@
   opacity: 0 !important;
   border-right-color: transparent !important;
   pointer-events: none;
+}
+
+/* Mobile Sidebar Drawer (Off-canvas) */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 280px;
+    max-width: 82vw;
+    z-index: 1000;
+    background: #0f172a;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    transform: translateX(0);
+    will-change: transform;
+    transition: transform var(--transition-normal);
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.8);
+    padding-top: max(1.5rem, env(safe-area-inset-top));
+    padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+  }
+
+  .sidebar-collapsed .sidebar {
+    transform: translateX(-100%) !important;
+    width: 280px !important;
+    padding: max(1.5rem, env(safe-area-inset-top)) 1.5rem !important;
+    opacity: 1 !important;
+    pointer-events: none;
+  }
 }
 
 .sidebar-brand {
@@ -32,21 +65,22 @@
 }
 
 .btn-sidebar-collapse {
-  background: transparent;
-  border: none;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
   color: var(--text-secondary);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0.35rem;
-  border-radius: 6px;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
   margin-left: auto;
   transition: all var(--transition-fast);
 }
 
 .btn-sidebar-collapse:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.12);
   color: var(--text-primary);
 }
 
