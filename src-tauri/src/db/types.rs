@@ -25,6 +25,16 @@ pub struct Subtask {
     pub created_at: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Note {
+    pub id: Option<i64>,
+    pub title: String,
+    pub content: String,
+    pub is_pinned: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 fn default_backup_frequency() -> i64 {
     60
 }

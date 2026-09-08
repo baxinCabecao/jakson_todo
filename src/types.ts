@@ -20,6 +20,15 @@ export interface Task {
   subtasks?: Subtask[];
 }
 
+export interface Note {
+  id?: number;
+  title: string;
+  content: string;
+  is_pinned: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AppSettings {
   onedrive_client_id?: string;
   onedrive_refresh_token?: string;

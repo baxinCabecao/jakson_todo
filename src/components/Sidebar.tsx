@@ -1,10 +1,10 @@
 import React from "react";
-import { CheckSquare, Briefcase, Settings as SettingsIcon, Cloud, ListTodo, Grid, ChevronLeft } from "lucide-react";
+import { CheckSquare, Briefcase, Settings as SettingsIcon, Cloud, ListTodo, Grid, ChevronLeft, FileText } from "lucide-react";
 import "./Sidebar.css";
 
 interface SidebarProps {
-  activeTab: "tasks" | "dashboard" | "settings" | "eisenhower";
-  setActiveTab: (tab: "tasks" | "dashboard" | "settings" | "eisenhower") => void;
+  activeTab: "tasks" | "notes" | "dashboard" | "settings" | "eisenhower";
+  setActiveTab: (tab: "tasks" | "notes" | "dashboard" | "settings" | "eisenhower") => void;
   onManualBackup: () => void;
   isBackingUp: boolean;
   lastBackupTime?: string;
@@ -25,7 +25,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isCollapsed,
   setIsCollapsed,
 }) => {
-  const handleNavClick = (tab: "tasks" | "dashboard" | "settings" | "eisenhower") => {
+  const handleNavClick = (tab: "tasks" | "notes" | "dashboard" | "settings" | "eisenhower") => {
     setActiveTab(tab);
     if (window.innerWidth <= 768) {
       setIsCollapsed(true);
@@ -61,6 +61,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         >
           <Grid size={18} />
           <span>Matriz Eisenhower</span>
+        </button>
+        <button
+          className={`nav-item ${activeTab === "notes" ? "active" : ""}`}
+          onClick={() => handleNavClick("notes")}
+        >
+          <FileText size={18} />
+          <span>Bloco de Notas</span>
         </button>
         <button
           className={`nav-item ${activeTab === "dashboard" ? "active" : ""}`}

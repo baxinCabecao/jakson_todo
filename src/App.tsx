@@ -6,7 +6,7 @@ import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notif
 import { Plus, Menu } from "lucide-react";
 
 import "./App.css"; // CRITICAL: Import the layout styles!
-import { Task, AppSettings, CloudBackupsCheck } from "./types";
+import { Task, Note, AppSettings, CloudBackupsCheck } from "./types";
 import { Sidebar } from "./components/Sidebar";
 import { Dashboard } from "./components/Dashboard";
 import { FiltersBar } from "./components/FiltersBar";
@@ -15,10 +15,12 @@ import { TaskModal } from "./components/TaskModal";
 import { Settings } from "./components/Settings";
 import { RestoreModal } from "./components/RestoreModal";
 import { EisenhowerMatrix } from "./components/EisenhowerMatrix";
+import { NotesFeed } from "./components/NotesFeed";
+import { NoteModal } from "./components/NoteModal";
 
 function App() {
   // Navigation tabs
-  const [activeTab, setActiveTab] = useState<"tasks" | "dashboard" | "settings" | "eisenhower">("tasks");
+  const [activeTab, setActiveTab] = useState<"tasks" | "notes" | "dashboard" | "settings" | "eisenhower">("tasks");
 
   // State
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -46,9 +48,14 @@ function App() {
   const [sortBy, setSortBy] = useState<"due_date" | "priority" | "title">("due_date");
   const [searchQuery, setSearchQuery] = useState<string>("");
 
-  // Modal / Form States
+  // Task Modal / Form States
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+
+  // Notes States
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
+  const [editingNote, setEditingNote] = useState<Note | null>(null);
 
   // Cloud Backup Alert State
   const [backupCheck, setBackupCheck] = useState<CloudBackupsCheck | null>(null);
@@ -80,9 +87,10 @@ function App() {
     localStorage.setItem("todo-layout-columns", columns.toString());
   }, [columns]);
 
-  // Load tasks and settings on startup
+  // Load tasks, notes and settings on startup
   useEffect(() => {
     loadTasks();
+    loadNotes();
     loadSettings();
     checkCloudBackups();
 
@@ -157,6 +165,15 @@ function App() {
     }
   };
 
+  const loadNotes = async () => {
+    try {
+      const res = await invoke<Note[]>("get_notes");
+      setNotes(res);
+    } catch (e) {
+      console.error("Erro ao buscar notas:", e);
+    }
+  };
+
   const loadSettings = async () => {
     try {
       const res = await invoke<AppSettings>("get_settings");
@@ -182,9 +199,10 @@ function App() {
     setIsRestoring(true);
     try {
       await invoke("restore_backup", { provider });
-      alert("Banco de dados restaurado com sucesso! Suas tarefas e credenciais de nuvem locais foram sincronizadas.");
+      alert("Banco de dados restaurado com sucesso! Suas tarefas, notas e credenciais de nuvem locais foram sincronizadas.");
       setShowRestoreModal(false);
       await loadTasks();
+      await loadNotes();
       await loadSettings();
     } catch (e) {
       alert(`Erro ao restaurar backup: ${e}`);
@@ -357,6 +375,58 @@ function App() {
       loadTasks();
     } catch (e) {
       alert(`Erro ao excluir tarefa: ${e}`);
+    }
+  };
+
+  // Open modal for note creation
+  const openCreateNoteModal = () => {
+    setEditingNote(null);
+    setIsNoteModalOpen(true);
+  };
+
+  // Open modal for note editing
+  const openEditNoteModal = (note: Note) => {
+    setEditingNote(note);
+    setIsNoteModalOpen(true);
+  };
+
+  // Save or Update note
+  const handleSaveNote = async (notePayload: Note) => {
+    try {
+      if (editingNote) {
+        await invoke("update_note", { note: notePayload });
+      } else {
+        await invoke("create_note", { note: notePayload });
+      }
+      setIsNoteModalOpen(false);
+      loadNotes();
+    } catch (e) {
+      alert(`Erro ao salvar nota: ${e}`);
+    }
+  };
+
+  // Delete note
+  const handleDeleteNote = async (id: number) => {
+    try {
+      await invoke("delete_note", { id });
+      loadNotes();
+    } catch (e) {
+      alert(`Erro ao excluir nota: ${e}`);
+    }
+  };
+
+  // Toggle pin status of note
+  const handleTogglePinNote = async (note: Note) => {
+    try {
+      const updated: Note = {
+        ...note,
+        is_pinned: !note.is_pinned,
+        updated_at: new Date().toISOString(),
+      };
+      await invoke("update_note", { note: updated });
+      loadNotes();
+    } catch (e) {
+      console.error("Erro ao alternar fixação da nota:", e);
     }
   };
 
@@ -546,6 +616,16 @@ function App() {
           />
         )}
 
+        {activeTab === "notes" && (
+          <NotesFeed
+            notes={notes}
+            onOpenCreateModal={openCreateNoteModal}
+            onEdit={openEditNoteModal}
+            onDelete={handleDeleteNote}
+            onTogglePin={handleTogglePinNote}
+          />
+        )}
+
         {activeTab === "dashboard" && (
           <Dashboard tasks={tasks} getDueStatus={getDueStatus} />
         )}
@@ -571,6 +651,15 @@ function App() {
         onClose={() => setIsTaskModalOpen(false)}
         editingTask={editingTask}
         onSave={handleSaveTask}
+      />
+
+      {/* Note Creation & Editing Modal */}
+      <NoteModal
+        isOpen={isNoteModalOpen}
+        onClose={() => setIsNoteModalOpen(false)}
+        editingNote={editingNote}
+        onSave={handleSaveNote}
+        onDelete={handleDeleteNote}
       />
 
       {/* Startup Cloud Restore Alert Modal */}

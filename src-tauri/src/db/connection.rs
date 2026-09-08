@@ -73,6 +73,19 @@ impl DbConnection {
             [],
         )?;
 
+        // Create notes table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL DEFAULT '',
+                is_pinned INTEGER NOT NULL DEFAULT 0 CHECK(is_pinned IN (0, 1)),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )",
+            [],
+        )?;
+
         // Create settings table
         conn.execute(
             "CREATE TABLE IF NOT EXISTS settings (

@@ -3,7 +3,7 @@ mod backup;
 #[cfg(desktop)]
 mod systray;
 
-use crate::db::{AppSettings, DbConnection, Task};
+use crate::db::{AppSettings, DbConnection, Task, Note};
 use crate::backup::{BackupReport, CloudBackupsCheck};
 use tauri::{AppHandle, Manager, State};
 use std::path::PathBuf;
@@ -36,6 +36,30 @@ async fn update_task(task: Task, state: State<'_, AppState>) -> Result<(), Strin
 async fn delete_task(id: i64, state: State<'_, AppState>) -> Result<(), String> {
     let db = DbConnection::new(state.db_path.parent().unwrap().to_path_buf());
     db.delete_task(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_notes(state: State<'_, AppState>) -> Result<Vec<Note>, String> {
+    let db = DbConnection::new(state.db_path.parent().unwrap().to_path_buf());
+    db.get_all_notes().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn create_note(note: Note, state: State<'_, AppState>) -> Result<i64, String> {
+    let db = DbConnection::new(state.db_path.parent().unwrap().to_path_buf());
+    db.create_note(note).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn update_note(note: Note, state: State<'_, AppState>) -> Result<(), String> {
+    let db = DbConnection::new(state.db_path.parent().unwrap().to_path_buf());
+    db.update_note(note).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn delete_note(id: i64, state: State<'_, AppState>) -> Result<(), String> {
+    let db = DbConnection::new(state.db_path.parent().unwrap().to_path_buf());
+    db.delete_note(id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -333,6 +357,10 @@ pub fn run() {
             create_task,
             update_task,
             delete_task,
+            get_notes,
+            create_note,
+            update_note,
+            delete_note,
             get_settings,
             save_settings,
             trigger_backup,
