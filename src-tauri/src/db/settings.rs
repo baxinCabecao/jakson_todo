@@ -23,6 +23,7 @@ impl DbConnection {
         let mut gdrive_enabled = false;
         let mut backup_frequency_mins = 60;
         let mut last_backup_time = None;
+        let mut last_safety_backup_time = None;
 
         for row in rows {
             let (key, val) = row?;
@@ -41,6 +42,7 @@ impl DbConnection {
                     }
                 }
                 "last_backup_time" => last_backup_time = Some(val),
+                "last_safety_backup_time" => last_safety_backup_time = Some(val),
                 _ => {}
             }
         }
@@ -64,6 +66,7 @@ impl DbConnection {
             gdrive_enabled,
             backup_frequency_mins,
             last_backup_time: clean_opt(last_backup_time),
+            last_safety_backup_time: clean_opt(last_safety_backup_time),
         })
     }
 
@@ -75,6 +78,23 @@ impl DbConnection {
             params![key, value],
         )?;
         Ok(())
+    }
+
+    /// Get a specific setting value by key
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
+        let conn = self.get_conn()?;
+        let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1")?;
+        let mut rows = stmt.query(params![key])?;
+        if let Some(row) = rows.next()? {
+            let val: String = row.get(0)?;
+            if val.trim().is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(val))
+            }
+        } else {
+            Ok(None)
+        }
     }
 
     /// Save all settings
@@ -92,6 +112,7 @@ impl DbConnection {
             ("gdrive_enabled", if settings.gdrive_enabled { "1".to_string() } else { "0".to_string() }),
             ("backup_frequency_mins", settings.backup_frequency_mins.to_string()),
             ("last_backup_time", settings.last_backup_time.unwrap_or_default()),
+            ("last_safety_backup_time", settings.last_safety_backup_time.unwrap_or_default()),
         ];
 
         for &(key, ref val) in &fields {

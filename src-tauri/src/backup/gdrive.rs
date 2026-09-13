@@ -2,7 +2,10 @@ use crate::backup::oauth::{get_effective_gdrive_client_id, get_effective_gdrive_
 use crate::backup::types::{GDriveListResponse, RemoteBackupInfo, TokenResponse};
 use crate::db::AppSettings;
 
-const BACKUP_FILENAME: &str = "jakson_todo_backup.db";
+pub const SYNC_PAYLOAD_FILENAME: &str = "jakson_todo_sync_v2.json.gz";
+pub const SAFETY_BACKUP_FILENAME: &str = "jakson_todo_safety_24h.json.gz";
+pub const BACKUP_FILENAME: &str = "jakson_todo_sync_v2.json.gz";
+pub const LEGACY_BACKUP_FILENAME: &str = "jakson_todo_backup.db";
 const APPDATA_FOLDER: &str = "appDataFolder";
 
 /// Refresh Google access token (supports PKCE with optional client_secret)
@@ -41,9 +44,11 @@ pub async fn refresh_gdrive_access_token(
     Ok(token_resp.access_token)
 }
 
-/// Upload backup file to Google Drive Application Data folder (appDataFolder)
-pub async fn upload_to_gdrive(
+/// Upload a file to Google Drive Application Data folder (appDataFolder)
+pub async fn upload_file_to_gdrive(
     access_token: &str,
+    filename: &str,
+    description: &str,
     db_bytes: Vec<u8>,
 ) -> Result<(), String> {
     let client = reqwest::Client::new();
@@ -51,7 +56,7 @@ pub async fn upload_to_gdrive(
     // 1. Search if file already exists in appDataFolder
     let search_url = format!(
         "https://www.googleapis.com/drive/v3/files?spaces={}&q=name='{}' and trashed=false&fields=files(id,name)",
-        APPDATA_FOLDER, BACKUP_FILENAME
+        APPDATA_FOLDER, filename
     );
     let search_res = client
         .get(&search_url)
@@ -87,8 +92,8 @@ pub async fn upload_to_gdrive(
     } else {
         // Create new file inside appDataFolder (multipart)
         let metadata = serde_json::json!({
-            "name": BACKUP_FILENAME,
-            "description": "Backup de tarefas do Jakson ToDo",
+            "name": filename,
+            "description": description,
             "parents": [APPDATA_FOLDER]
         });
 
@@ -123,9 +128,79 @@ pub async fn upload_to_gdrive(
     Ok(())
 }
 
-/// Query Google Drive appDataFolder for backup file modified time
-pub async fn get_gdrive_backup_info(
+#[allow(dead_code)]
+/// Upload primary backup file to Google Drive
+pub async fn upload_to_gdrive(
+    access_token: &str,
+    db_bytes: Vec<u8>,
+) -> Result<(), String> {
+    upload_file_to_gdrive(access_token, BACKUP_FILENAME, "Backup de dados do Jakson ToDo", db_bytes).await
+}
+
+#[allow(dead_code)]
+/// Upload 24h safety backup file to Google Drive
+pub async fn upload_safety_to_gdrive(
+    access_token: &str,
+    db_bytes: Vec<u8>,
+) -> Result<(), String> {
+    upload_file_to_gdrive(access_token, SAFETY_BACKUP_FILENAME, "Cópia de segurança 24h do Jakson ToDo", db_bytes).await
+}
+
+/// Download a file from Google Drive appDataFolder
+pub async fn download_file_from_gdrive(
+    access_token: &str,
+    filename: &str,
+) -> Result<Vec<u8>, String> {
+    let client = reqwest::Client::new();
+    let search_url = format!(
+        "https://www.googleapis.com/drive/v3/files?spaces={}&q=name='{}' and trashed=false&fields=files(id)",
+        APPDATA_FOLDER, filename
+    );
+    let search_res = client
+        .get(&search_url)
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .map_err(|e| format!("Falha ao buscar '{}' no Google Drive: {}", filename, e))?;
+
+    let list: GDriveListResponse = search_res
+        .json()
+        .await
+        .map_err(|e| format!("Falha ao processar lista de arquivos: {}", e))?;
+
+    if let Some(file) = list.files.first() {
+        let download_url = format!(
+            "https://www.googleapis.com/drive/v3/files/{}?alt=media",
+            file.id
+        );
+        let download_res = client
+            .get(&download_url)
+            .bearer_auth(access_token)
+            .send()
+            .await
+            .map_err(|e| format!("Falha ao baixar '{}' do Google Drive: {}", filename, e))?;
+
+        if !download_res.status().is_success() {
+            let err_text = download_res.text().await.unwrap_or_default();
+            return Err(format!("Erro no download do Google Drive: {}", err_text));
+        }
+
+        let bytes = download_res
+            .bytes()
+            .await
+            .map_err(|e| format!("Falha ao ler dados baixados: {}", e))?
+            .to_vec();
+
+        Ok(bytes)
+    } else {
+        Err(format!("Arquivo '{}' não encontrado no Google Drive.", filename))
+    }
+}
+
+/// Query Google Drive appDataFolder for file modified time
+pub async fn get_gdrive_file_info(
     settings: &AppSettings,
+    filename: &str,
 ) -> RemoteBackupInfo {
     let mut info = RemoteBackupInfo {
         provider: "GDrive".to_string(),
@@ -152,7 +227,7 @@ pub async fn get_gdrive_backup_info(
     let client = reqwest::Client::new();
     let search_url = format!(
         "https://www.googleapis.com/drive/v3/files?spaces={}&q=name='{}' and trashed=false&fields=files(id,modifiedTime)",
-        APPDATA_FOLDER, BACKUP_FILENAME
+        APPDATA_FOLDER, filename
     );
 
     if let Ok(res) = client.get(&search_url).bearer_auth(&access_token).send().await {
@@ -167,4 +242,19 @@ pub async fn get_gdrive_backup_info(
     }
 
     info
+}
+
+/// Query Google Drive appDataFolder for main backup file modified time
+pub async fn get_gdrive_backup_info(
+    settings: &AppSettings,
+) -> RemoteBackupInfo {
+    get_gdrive_file_info(settings, BACKUP_FILENAME).await
+}
+
+#[allow(dead_code)]
+/// Query Google Drive appDataFolder for 24h safety backup file modified time
+pub async fn get_gdrive_safety_backup_info(
+    settings: &AppSettings,
+) -> RemoteBackupInfo {
+    get_gdrive_file_info(settings, SAFETY_BACKUP_FILENAME).await
 }

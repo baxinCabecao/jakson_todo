@@ -4,7 +4,7 @@ mod backup;
 mod systray;
 
 use crate::db::{AppSettings, DbConnection, Task, Note};
-use crate::backup::{BackupReport, CloudBackupsCheck};
+use crate::backup::{BackupReport, CloudBackupsCheck, SyncResult};
 use tauri::{AppHandle, Manager, State};
 use std::path::PathBuf;
 use chrono::Local;
@@ -60,6 +60,11 @@ async fn update_note(note: Note, state: State<'_, AppState>) -> Result<(), Strin
 async fn delete_note(id: i64, state: State<'_, AppState>) -> Result<(), String> {
     let db = DbConnection::new(state.db_path.parent().unwrap().to_path_buf());
     db.delete_note(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn exit_app(app_handle: AppHandle) {
+    app_handle.exit(0);
 }
 
 #[tauri::command]
@@ -138,6 +143,18 @@ async fn restore_backup(provider: String, state: State<'_, AppState>) -> Result<
     crate::backup::restore_db_from_cloud(provider, state.db_path.clone(), settings).await
 }
 
+#[tauri::command]
+async fn auto_sync(app_handle: AppHandle, state: State<'_, AppState>) -> Result<SyncResult, String> {
+    crate::backup::run_auto_sync(&app_handle, state.db_path.clone()).await
+}
+
+#[tauri::command]
+async fn restore_safety_backup(provider: String, state: State<'_, AppState>) -> Result<(), String> {
+    let db = DbConnection::new(state.db_path.parent().unwrap().to_path_buf());
+    let settings = db.get_settings().map_err(|e| e.to_string())?;
+    crate::backup::restore_safety_backup_from_cloud(provider, state.db_path.clone(), settings).await
+}
+
 /// Helper function to show notifications for manual backup triggers
 fn show_backup_notification_manual(app_handle: &AppHandle, report: &BackupReport) {
     use tauri_plugin_notification::NotificationExt;
@@ -176,6 +193,7 @@ fn show_backup_notification_manual(app_handle: &AppHandle, report: &BackupReport
     }
 }
 
+#[allow(dead_code)]
 /// Helper function to show notifications for background auto backup errors
 fn show_backup_notification(app_handle: &AppHandle, report: BackupReport) {
     use tauri_plugin_notification::NotificationExt;
@@ -267,40 +285,18 @@ fn check_startup_tasks_and_notify(app_handle: &AppHandle, db_path: PathBuf) {
     }
 }
 
-/// Background thread/task for automatic backups
+/// Background thread/task for automatic synchronization
 fn start_auto_backup_loop(app_handle: AppHandle, db_path: PathBuf) {
     tauri::async_runtime::spawn(async move {
         loop {
-            // Check settings and frequency every 60 seconds
+            // Check every 60 seconds
             tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
 
             let db = DbConnection::new(db_path.parent().unwrap().to_path_buf());
             if let Ok(settings) = db.get_settings() {
                 if settings.onedrive_enabled || settings.gdrive_enabled {
-                    let should_backup = match settings.last_backup_time {
-                        Some(ref last_time) => {
-                            if let Ok(last_dt) = chrono::DateTime::parse_from_rfc3339(last_time) {
-                                let now = chrono::Utc::now();
-                                let elapsed = now.signed_duration_since(last_dt.with_timezone(&chrono::Utc));
-                                elapsed.num_minutes() >= settings.backup_frequency_mins
-                            } else {
-                                true
-                            }
-                        }
-                        None => true,
-                    };
-
-                    if should_backup {
-                        match crate::backup::run_backup_to_clouds(db_path.clone(), settings).await {
-                            Ok(report) => {
-                                let now_str = chrono::Utc::now().to_rfc3339();
-                                let _ = db.save_setting("last_backup_time", &now_str);
-                                show_backup_notification(&app_handle, report);
-                            }
-                            Err(e) => {
-                                eprintln!("Auto backup error: {}", e);
-                            }
-                        }
+                    if let Err(e) = crate::backup::run_auto_sync(&app_handle, db_path.clone()).await {
+                        eprintln!("[AutoSync Background] Erro: {}", e);
                     }
                 }
             }
@@ -361,6 +357,7 @@ pub fn run() {
             create_note,
             update_note,
             delete_note,
+            exit_app,
             get_settings,
             save_settings,
             trigger_backup,
@@ -368,7 +365,9 @@ pub fn run() {
             handle_oauth_url,
             disconnect_provider,
             check_backups,
-            restore_backup
+            restore_backup,
+            auto_sync,
+            restore_safety_backup
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

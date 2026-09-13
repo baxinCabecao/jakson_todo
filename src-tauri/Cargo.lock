@@ -1890,6 +1890,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "dotenvy",
+ "flate2",
  "rand 0.8.7",
  "reqwest 0.12.28",
  "rusqlite",
@@ -1903,6 +1904,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tokio",
  "url",
+ "uuid",
 ]
 
 [[package]]

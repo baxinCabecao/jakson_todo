@@ -1,5 +1,6 @@
 export interface Subtask {
   id?: number;
+  uuid?: string;
   task_id?: number;
   title: string;
   description?: string;
@@ -7,26 +8,34 @@ export interface Subtask {
   priority: string; // "high", "medium", "low"
   completed: boolean;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface Task {
   id?: number;
+  uuid?: string;
   title: string;
   description?: string;
   due_date?: string; // YYYY-MM-DD
   priority: string; // "high", "medium", "low"
   status: string; // "todo", "in_progress", "completed"
   created_at: string;
+  updated_at?: string;
+  is_deleted?: boolean;
+  deleted_at?: string;
   subtasks?: Subtask[];
 }
 
 export interface Note {
   id?: number;
+  uuid?: string;
   title: string;
   content: string;
   is_pinned: boolean;
   created_at: string;
   updated_at: string;
+  is_deleted?: boolean;
+  deleted_at?: string;
 }
 
 export interface AppSettings {
@@ -38,6 +47,18 @@ export interface AppSettings {
   gdrive_enabled: boolean;
   backup_frequency_mins: number;
   last_backup_time?: string;
+  last_safety_backup_time?: string;
+}
+
+export interface SyncResult {
+  action: "restored" | "synced" | "skipped" | "none";
+  message: string;
+  safety_snapshot_taken: boolean;
+  provider?: string;
+  tasks_pulled?: number;
+  tasks_pushed?: number;
+  notes_pulled?: number;
+  notes_pushed?: number;
 }
 
 export interface RemoteBackupInfo {

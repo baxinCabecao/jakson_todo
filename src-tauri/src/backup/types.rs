@@ -1,4 +1,15 @@
+use crate::db::{Note, Task};
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SyncPayload {
+    pub version: u32,
+    pub schema_version: u32,
+    pub client_device_id: String,
+    pub synced_at: String,
+    pub tasks: Vec<Task>,
+    pub notes: Vec<Note>,
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BackupStatus {
@@ -28,6 +39,22 @@ pub struct CloudBackupsCheck {
     pub local_last_modified: String,
     pub newer_backup_available: bool,
     pub recommended_provider: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SyncResult {
+    pub action: String, // "synced", "restored", "skipped", "none"
+    pub message: String,
+    pub safety_snapshot_taken: bool,
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub tasks_pulled: usize,
+    #[serde(default)]
+    pub tasks_pushed: usize,
+    #[serde(default)]
+    pub notes_pulled: usize,
+    #[serde(default)]
+    pub notes_pushed: usize,
 }
 
 // Structs for parsing OAuth and API responses

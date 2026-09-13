@@ -1,12 +1,13 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { onBackButtonPress } from "@tauri-apps/api/app";
 import { onOpenUrl, getCurrent } from "@tauri-apps/plugin-deep-link";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import { Plus, Menu } from "lucide-react";
 
 import "./App.css"; // CRITICAL: Import the layout styles!
-import { Task, Note, AppSettings, CloudBackupsCheck } from "./types";
+import { Task, Note, AppSettings, CloudBackupsCheck, SyncResult } from "./types";
 import { Sidebar } from "./components/Sidebar";
 import { Dashboard } from "./components/Dashboard";
 import { FiltersBar } from "./components/FiltersBar";
@@ -64,6 +65,52 @@ function App() {
   const [backupReport, setBackupReport] = useState<any>(null);
   const [isBackingUp, setIsBackingUp] = useState(false);
 
+  // Back navigation & exit state (Android & Desktop)
+  const [exitToastVisible, setExitToastVisible] = useState(false);
+  const lastBackPressTimeRef = useRef(0);
+  const toastTimeoutRef = useRef<any>(null);
+
+  // Debounced auto-sync timer ref
+  const autoSyncTimerRef = useRef<any>(null);
+
+  const triggerDebouncedSync = () => {
+    if (autoSyncTimerRef.current) {
+      clearTimeout(autoSyncTimerRef.current);
+    }
+    autoSyncTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await invoke<SyncResult>("auto_sync");
+        console.log("[App] Sincronização inteligente:", res);
+        if (res.tasks_pulled || res.notes_pulled || res.action === "restored") {
+          await loadTasks();
+          await loadNotes();
+        }
+        await loadSettings();
+      } catch (err) {
+        console.error("[App] Erro na sincronização inteligente:", err);
+      }
+    }, 3000); // 3s debounce
+  };
+
+  // Keep latest navigation state accessible to global event listener without re-registering
+  const navigationStateRef = useRef({
+    isNoteModalOpen,
+    isTaskModalOpen,
+    showRestoreModal,
+    isSidebarCollapsed,
+    activeTab,
+  });
+
+  useEffect(() => {
+    navigationStateRef.current = {
+      isNoteModalOpen,
+      isTaskModalOpen,
+      showRestoreModal,
+      isSidebarCollapsed,
+      activeTab,
+    };
+  }, [isNoteModalOpen, isTaskModalOpen, showRestoreModal, isSidebarCollapsed, activeTab]);
+
   // Font Size State (Default 13px, persisted in localStorage)
   const [fontSize, setFontSize] = useState<number>(() => {
     const saved = localStorage.getItem("todo-font-size");
@@ -92,6 +139,21 @@ function App() {
     loadTasks();
     loadNotes();
     loadSettings();
+
+    // Trigger non-destructive two-way sync on startup
+    invoke<SyncResult>("auto_sync")
+      .then((res) => {
+        console.log("[App] Sincronização de inicialização:", res);
+        if (res.tasks_pulled || res.notes_pulled) {
+          loadTasks();
+          loadNotes();
+        }
+        loadSettings();
+      })
+      .catch((err) => {
+        console.log("[App] Sincronização inicial em segundo plano:", err);
+      });
+
     checkCloudBackups();
 
     // Listen for OAuth success/error events from Rust backend
@@ -102,6 +164,21 @@ function App() {
 
     const unlistenError = listen<string>("oauth-error", (event) => {
       alert(`Erro na autenticação: ${event.payload}`);
+    });
+
+    // Listen for automatic cloud synchronization updates from Rust
+    const unlistenCloudSynced = listen<{ tasks_pulled?: number; notes_pulled?: number }>("cloud-synced", (event) => {
+      console.log("[App] Dados sincronizados da nuvem:", event.payload);
+      loadTasks();
+      loadNotes();
+      loadSettings();
+    });
+
+    const unlistenCloudRestored = listen<{ provider: string }>("cloud-restored", (event) => {
+      console.log("[App] Dados sincronizados da nuvem via:", event.payload);
+      loadTasks();
+      loadNotes();
+      loadSettings();
     });
 
     // Listen for OAuth deep link callbacks (Mobile & Desktop)
@@ -149,12 +226,92 @@ function App() {
     };
     ensureNotificationPermission();
 
+    // Register Android Back Button listener via Tauri API
+    let backListener: any = null;
+    onBackButtonPress(() => {
+      handleBackAction();
+    })
+      .then((listener) => {
+        backListener = listener;
+      })
+      .catch((err) => {
+        console.log("onBackButtonPress não disponível neste ambiente:", err);
+      });
+
+    // Register Desktop Escape key listener
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        const state = navigationStateRef.current;
+        if (
+          state.isNoteModalOpen ||
+          state.isTaskModalOpen ||
+          state.showRestoreModal ||
+          (!state.isSidebarCollapsed && window.innerWidth <= 768)
+        ) {
+          handleBackAction();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+
     return () => {
       unlistenSuccess.then((f) => f());
       unlistenError.then((f) => f());
       unlistenDeepLink.then((f) => f());
+      unlistenCloudSynced.then((f) => f());
+      unlistenCloudRestored.then((f) => f());
+      if (backListener && typeof backListener.unregister === "function") {
+        backListener.unregister();
+      }
+      window.removeEventListener("keydown", handleKeyDown);
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+      if (autoSyncTimerRef.current) clearTimeout(autoSyncTimerRef.current);
     };
   }, []);
+
+  // Unified back navigation action (Android Back Button & Desktop Escape)
+  const handleBackAction = () => {
+    const state = navigationStateRef.current;
+
+    // Priority 1: Close active modals
+    if (state.isNoteModalOpen) {
+      setIsNoteModalOpen(false);
+      return;
+    }
+    if (state.isTaskModalOpen) {
+      setIsTaskModalOpen(false);
+      return;
+    }
+    if (state.showRestoreModal) {
+      setShowRestoreModal(false);
+      return;
+    }
+
+    // Priority 2: Close mobile sidebar drawer if open
+    if (!state.isSidebarCollapsed && typeof window !== "undefined" && window.innerWidth <= 768) {
+      handleToggleSidebar(true);
+      return;
+    }
+
+    // Priority 3: Return to home tab ("tasks") if in a secondary tab
+    if (state.activeTab !== "tasks") {
+      setActiveTab("tasks");
+      return;
+    }
+
+    // Priority 4: Root screen ("tasks") - Double back to exit (Android standard)
+    const now = Date.now();
+    if (now - lastBackPressTimeRef.current < 2000) {
+      invoke("exit_app").catch((e) => console.error("Erro ao fechar aplicativo:", e));
+    } else {
+      lastBackPressTimeRef.current = now;
+      setExitToastVisible(true);
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+      toastTimeoutRef.current = setTimeout(() => {
+        setExitToastVisible(false);
+      }, 2000);
+    }
+  };
 
   const loadTasks = async () => {
     try {
@@ -187,9 +344,6 @@ function App() {
     try {
       const res = await invoke<CloudBackupsCheck>("check_backups");
       setBackupCheck(res);
-      if (res.newer_backup_available) {
-        setShowRestoreModal(true);
-      }
     } catch (e) {
       console.error("Erro ao checar backups na nuvem:", e);
     }
@@ -199,13 +353,33 @@ function App() {
     setIsRestoring(true);
     try {
       await invoke("restore_backup", { provider });
-      alert("Banco de dados restaurado com sucesso! Suas tarefas, notas e credenciais de nuvem locais foram sincronizadas.");
+      alert("Dados sincronizados com sucesso a partir da nuvem!");
       setShowRestoreModal(false);
       await loadTasks();
       await loadNotes();
       await loadSettings();
     } catch (e) {
-      alert(`Erro ao restaurar backup: ${e}`);
+      alert(`Erro ao restaurar: ${e}`);
+    } finally {
+      setIsRestoring(false);
+    }
+  };
+
+  const handleRestoreSafetyBackup = async (provider: string) => {
+    const confirmed = confirm(
+      `Tem certeza que deseja restaurar a CÓPIA DE SEGURANÇA (24h) do ${provider === "gdrive" ? "Google Drive" : "OneDrive"}?\n\nIsso recuperará as tarefas e notas do snapshot do dia anterior.`
+    );
+    if (!confirmed) return;
+
+    setIsRestoring(true);
+    try {
+      await invoke("restore_safety_backup", { provider });
+      alert("Cópia de segurança de 24 horas restaurada com sucesso!");
+      await loadTasks();
+      await loadNotes();
+      await loadSettings();
+    } catch (e) {
+      alert(`Erro ao restaurar cópia de segurança de 24h: ${e}`);
     } finally {
       setIsRestoring(false);
     }
@@ -214,29 +388,14 @@ function App() {
   const handleManualBackup = async () => {
     setIsBackingUp(true);
     try {
-      // Ensure permission so OS notification can show
-      try {
-        const granted = await isPermissionGranted();
-        if (!granted) {
-          await requestPermission();
-        }
-      } catch (err) {
-        console.error("Erro ao checar permissão de notificação:", err);
-      }
-
-      const report = await invoke<any>("trigger_backup");
-      setBackupReport(report);
+      const res = await invoke<SyncResult>("auto_sync");
+      setBackupReport(res);
+      await loadTasks();
+      await loadNotes();
       await loadSettings();
-
-      if (report.gdrive.enabled && !report.gdrive.success) {
-        alert(`Backup no Google Drive falhou: ${report.gdrive.error_message || "Erro desconhecido"}`);
-      } else if (report.onedrive.enabled && !report.onedrive.success) {
-        alert(`Backup no OneDrive falhou: ${report.onedrive.error_message || "Erro desconhecido"}`);
-      } else if (report.gdrive.success || report.onedrive.success) {
-        alert("Backup manual realizado com sucesso!");
-      }
+      alert(res.message || "Sincronização concluída com sucesso!");
     } catch (e) {
-      alert(`Erro ao disparar backup: ${e}`);
+      alert(`Erro na sincronização: ${e}`);
     } finally {
       setIsBackingUp(false);
     }
@@ -362,6 +521,7 @@ function App() {
       }
       setIsTaskModalOpen(false);
       loadTasks();
+      triggerDebouncedSync();
     } catch (e) {
       alert(`Erro ao salvar tarefa: ${e}`);
     }
@@ -373,6 +533,7 @@ function App() {
     try {
       await invoke("delete_task", { id });
       loadTasks();
+      triggerDebouncedSync();
     } catch (e) {
       alert(`Erro ao excluir tarefa: ${e}`);
     }
@@ -400,6 +561,7 @@ function App() {
       }
       setIsNoteModalOpen(false);
       loadNotes();
+      triggerDebouncedSync();
     } catch (e) {
       alert(`Erro ao salvar nota: ${e}`);
     }
@@ -410,6 +572,7 @@ function App() {
     try {
       await invoke("delete_note", { id });
       loadNotes();
+      triggerDebouncedSync();
     } catch (e) {
       alert(`Erro ao excluir nota: ${e}`);
     }
@@ -425,6 +588,7 @@ function App() {
       };
       await invoke("update_note", { note: updated });
       loadNotes();
+      triggerDebouncedSync();
     } catch (e) {
       console.error("Erro ao alternar fixação da nota:", e);
     }
@@ -447,6 +611,7 @@ function App() {
     try {
       await invoke("update_task", { task: updated });
       loadTasks();
+      triggerDebouncedSync();
     } catch (e) {
       console.error(e);
     }
@@ -466,6 +631,7 @@ function App() {
     try {
       await invoke("update_task", { task: updated });
       loadTasks();
+      triggerDebouncedSync();
     } catch (e) {
       console.error(e);
     }
@@ -480,6 +646,7 @@ function App() {
     try {
       await invoke("update_task", { task: updated });
       loadTasks();
+      triggerDebouncedSync();
     } catch (e) {
       console.error(e);
       alert(`Erro ao atualizar data de vencimento: ${e}`);
@@ -637,6 +804,7 @@ function App() {
             onConnectProvider={handleConnectProvider}
             onDisconnectProvider={handleDisconnectProvider}
             onRestoreBackup={handleRestoreBackup}
+            onRestoreSafetyBackup={handleRestoreSafetyBackup}
             isRestoring={isRestoring}
             isBackingUp={isBackingUp}
             backupReport={backupReport}
@@ -670,6 +838,13 @@ function App() {
         onRestore={handleRestoreBackup}
         isRestoring={isRestoring}
       />
+
+      {/* Android Double Back Exit Toast Notification */}
+      {exitToastVisible && (
+        <div className="android-exit-toast">
+          Pressione voltar novamente para sair
+        </div>
+      )}
     </div>
   );
 }

@@ -26,49 +26,47 @@ export const RestoreModal: React.FC<RestoreModalProps> = ({
         <div className="modal-header">
           <h2 className="text-warning flex items-center gap-2">
             <AlertTriangle size={20} />
-            <span>Backup Mais Recente Encontrado!</span>
+            <span>Atualização da Nuvem Disponível</span>
           </h2>
         </div>
         <div className="modal-body">
           <p>
-            A aplicação detectou que existe um backup mais novo na nuvem em comparação com
-            os dados locais.
+            Detectamos dados mais recentes na nuvem gravados por outro dispositivo.
           </p>
 
           <div className="backup-comparison-box">
             <p>
-              <strong>Provedor Recomendado:</strong> {backupCheck.recommended_provider}
+              <strong>Provedor Recomendado:</strong> {backupCheck.recommended_provider === "gdrive" ? "Google Drive" : backupCheck.recommended_provider === "onedrive" ? "OneDrive" : backupCheck.recommended_provider}
             </p>
             <p>
-              <strong>Última Modificação Local:</strong>{" "}
+              <strong>Última Sincronização Local:</strong>{" "}
               {backupCheck.local_last_modified
                 ? new Date(backupCheck.local_last_modified).toLocaleString()
-                : "Sem dados"}
+                : "Sem registro anterior"}
             </p>
 
             {backupCheck.gdrive.exists && backupCheck.gdrive.last_modified && (
               <p>
-                <strong>Google Drive Backup:</strong>{" "}
+                <strong>Google Drive:</strong>{" "}
                 {new Date(backupCheck.gdrive.last_modified).toLocaleString()}
               </p>
             )}
 
             {backupCheck.onedrive.exists && backupCheck.onedrive.last_modified && (
               <p>
-                <strong>OneDrive Backup:</strong>{" "}
+                <strong>OneDrive:</strong>{" "}
                 {new Date(backupCheck.onedrive.last_modified).toLocaleString()}
               </p>
             )}
           </div>
 
           <p className="warning-note">
-            A restauração irá substituir os seus dados locais atuais. Deseja prosseguir
-            com a restauração?
+            A sincronização irá mesclar os dados de forma inteligente (sem apagar suas alterações locais não sincronizadas). Deseja atualizar agora?
           </p>
         </div>
         <div className="modal-footer">
           <button className="btn-secondary" onClick={onClose} disabled={isRestoring}>
-            Manter Dados Locais
+            Agora Não
           </button>
           <button
             className="btn-primary"
@@ -76,8 +74,8 @@ export const RestoreModal: React.FC<RestoreModalProps> = ({
             disabled={isRestoring}
           >
             {isRestoring
-              ? "Restaurando..."
-              : `Restaurar do ${backupCheck.recommended_provider}`}
+              ? "Sincronizando..."
+              : `Sincronizar com ${backupCheck.recommended_provider === "onedrive" ? "OneDrive" : "Google Drive"}`}
           </button>
         </div>
       </div>

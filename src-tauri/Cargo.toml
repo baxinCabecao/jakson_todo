@@ -34,5 +34,7 @@ sha2 = "0.10"
 base64 = "0.22"
 rand = "0.8"
 url = "2"
+flate2 = "1.0"
+uuid = { version = "1.8", features = ["v4", "serde"] }
 
 

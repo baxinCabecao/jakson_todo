@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Cloud, Clock, RefreshCw, Database, ShieldCheck } from "lucide-react";
+import { Cloud, Clock, RefreshCw, ShieldCheck } from "lucide-react";
 import { AppSettings } from "../types";
 import "./Settings.css";
 
@@ -8,7 +8,8 @@ interface SettingsProps {
   onSaveSettings: (settings: AppSettings) => void;
   onConnectProvider: (provider: "gdrive" | "onedrive") => void;
   onDisconnectProvider: (provider: "gdrive" | "onedrive") => void;
-  onRestoreBackup: (provider: string) => void;
+  onRestoreBackup?: (provider: string) => void;
+  onRestoreSafetyBackup: (provider: string) => void;
   isRestoring: boolean;
   isBackingUp: boolean;
   backupReport: any;
@@ -42,7 +43,7 @@ const ProviderSection: React.FC<ProviderCardProps> = ({
 
   const getBadgeText = () => {
     if (!isConnected) return "Não Conectado";
-    return enabled ? "Conectado e Ativo" : "Conectado (Backup Pausado)";
+    return enabled ? "Conectado e Sincronizando" : "Conectado (Sincronização Pausada)";
   };
 
   return (
@@ -56,15 +57,13 @@ const ProviderSection: React.FC<ProviderCardProps> = ({
         <div className="provider-info-box">
           <ShieldCheck size={18} className="text-emerald" />
           <span>
-            Autenticação segura e direta via <strong>PKCE</strong> com armazenamento isolado na pasta interna (<strong>appDataFolder</strong>).
+            Autenticação segura via <strong>PKCE</strong> na pasta isolada (<strong>appDataFolder</strong>).
           </span>
         </div>
       )}
 
       <div className="provider-status-row">
-        <div className={`status-badge ${getBadgeClass()}`}>
-          {getBadgeText()}
-        </div>
+        <div className={`status-badge ${getBadgeClass()}`}>{getBadgeText()}</div>
 
         {isConnected ? (
           <>
@@ -88,19 +87,17 @@ const ProviderSection: React.FC<ProviderCardProps> = ({
             disabled={!isConnected}
             onChange={(e) => {
               if (!isConnected) {
-                alert(`Conecte sua conta do ${name} primeiro antes de ativar o backup automático.`);
+                alert(`Conecte sua conta do ${name} primeiro antes de ativar a sincronização.`);
                 return;
               }
               onToggle(e.target.checked);
             }}
           />
-          <span>Ativar Backup Automático</span>
+          <span>Sincronização Automática</span>
         </label>
       </div>
       {!isConnected && (
-        <p className="field-tip mt-1">
-          * Conecte sua conta do {name} acima para liberar o backup em nuvem.
-        </p>
+        <p className="field-tip mt-1">* Conecte sua conta do {name} acima para sincronizar entre seus dispositivos.</p>
       )}
     </section>
   );
@@ -111,10 +108,9 @@ export const Settings: React.FC<SettingsProps> = ({
   onSaveSettings,
   onConnectProvider,
   onDisconnectProvider,
-  onRestoreBackup,
+  onRestoreSafetyBackup,
   isRestoring,
   isBackingUp,
-  backupReport,
   onManualBackup,
 }) => {
   const [backupFrequencyMins, setBackupFrequencyMins] = useState(60);
@@ -140,12 +136,28 @@ export const Settings: React.FC<SettingsProps> = ({
     });
   };
 
+  const formatDateTime = (isoStr?: string) => {
+    if (!isoStr) return "Nenhuma sincronização registrada ainda";
+    try {
+      const d = new Date(isoStr);
+      return d.toLocaleString("pt-BR", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return isoStr;
+    }
+  };
+
   return (
     <div className="tab-pane animate-fade-in">
       <header className="content-header">
         <div>
           <h1>Configurações da Aplicação</h1>
-          <p>Gerencie seus provedores de backup na nuvem e preferências globais.</p>
+          <p>Gerencie provedores de nuvem, sincronização entre dispositivos e cópias de recuperação.</p>
         </div>
       </header>
 
@@ -171,23 +183,23 @@ export const Settings: React.FC<SettingsProps> = ({
           onDisconnect={() => onDisconnectProvider("onedrive")}
         />
 
-        {/* Auto Backup Options */}
+        {/* Auto Sync Frequency */}
         <section className="settings-section-card">
           <div className="section-header">
             <Clock size={20} className="section-icon" />
-            <h2>Opções de Backup Automático</h2>
+            <h2>Opções de Sincronização em Segundo Plano</h2>
           </div>
 
           <div className="form-group-field short">
-            <label>Frequência do Backup Automático (Minutos)</label>
+            <label>Intervalo de Verificação Periódica (Minutos)</label>
             <input
               type="number"
-              min="5"
+              min="1"
               value={backupFrequencyMins}
               onChange={(e) => setBackupFrequencyMins(parseInt(e.target.value) || 60)}
             />
             <p className="field-tip">
-              Define o intervalo em que a aplicação salvará silenciosamente os dados na nuvem.
+              Intervalo para verificação em segundo plano se há atualizações de outros dispositivos na nuvem.
             </p>
           </div>
         </section>
@@ -196,77 +208,68 @@ export const Settings: React.FC<SettingsProps> = ({
           <button type="submit" className="btn-primary">
             Salvar Preferências
           </button>
+        </div>
+      </form>
+
+      {/* Real-Time Two-Way Sync Panel */}
+      <section className="settings-section-card">
+        <div className="section-header">
+          <RefreshCw size={20} className="section-icon text-emerald" />
+          <h2>Sincronização entre Dispositivos</h2>
+        </div>
+        <p>
+          Suas tarefas e notas são sincronizadas de forma bidirecional e não destrutiva. Modificações em outros
+          computadores ou celulares são unificadas sem perda de dados locais.
+        </p>
+        <p className="field-tip mt-1">
+          <strong>Última sincronização:</strong> {formatDateTime(settings.last_backup_time)}
+        </p>
+
+        <div className="mt-2">
           <button
             type="button"
             className="btn-secondary"
             onClick={onManualBackup}
-            disabled={isBackingUp}
+            disabled={isBackingUp || (!settings.gdrive_enabled && !settings.onedrive_enabled)}
           >
             <RefreshCw size={14} className={isBackingUp ? "spin" : ""} />
-            <span>Fazer Backup Agora</span>
-          </button>
-        </div>
-      </form>
-
-      {/* Manual Backups Management */}
-      <section className="settings-section-card danger-zone">
-        <div className="section-header">
-          <Database size={20} className="section-icon text-rose" />
-          <h2>Restauração de Backup Manual</h2>
-        </div>
-        <p>Você pode forçar a restauração dos seus dados salvos em nuvem a qualquer momento.</p>
-
-        <div className="restore-actions">
-          <button
-            className="btn-secondary danger"
-            onClick={() => onRestoreBackup("gdrive")}
-            disabled={isRestoring || !settings.gdrive_enabled}
-          >
-            Restaurar do Google Drive
-          </button>
-          <button
-            className="btn-secondary danger"
-            onClick={() => onRestoreBackup("onedrive")}
-            disabled={isRestoring || !settings.onedrive_enabled}
-          >
-            Restaurar do OneDrive
+            <span>{isBackingUp ? "Sincronizando..." : "Sincronizar Agora"}</span>
           </button>
         </div>
       </section>
 
-      {backupReport && (
-        <section className="settings-section-card">
-          <h3>Relatório do Último Backup Manual</h3>
-          <div className="report-logs">
-            {!backupReport.onedrive.enabled && !backupReport.gdrive.enabled ? (
-              <p className="text-rose">Nenhum provedor de nuvem está configurado ou ativado para backup.</p>
-            ) : (
-              <>
-                {backupReport.onedrive.enabled && (
-                  <p>
-                    <strong>OneDrive:</strong>{" "}
-                    {backupReport.onedrive.success ? (
-                      <span className="text-emerald">Sucesso</span>
-                    ) : (
-                      <span className="text-rose">Falhou ({backupReport.onedrive.error_message})</span>
-                    )}
-                  </p>
-                )}
-                {backupReport.gdrive.enabled && (
-                  <p>
-                    <strong>Google Drive:</strong>{" "}
-                    {backupReport.gdrive.success ? (
-                      <span className="text-emerald">Sucesso</span>
-                    ) : (
-                      <span className="text-rose">Falhou ({backupReport.gdrive.error_message})</span>
-                    )}
-                  </p>
-                )}
-              </>
-            )}
-          </div>
-        </section>
-      )}
+      {/* 24-Hour Safety Snapshot Restore */}
+      <section className="settings-section-card">
+        <div className="section-header">
+          <ShieldCheck size={20} className="section-icon text-amber" />
+          <h2>Cópia de Segurança de 24 Horas (Recuperação de Desastres)</h2>
+        </div>
+        <p>
+          Snapshot estático mantido e rotacionado a cada 24 horas para recuperação caso você tenha excluído tarefas ou notas por acidente.
+        </p>
+        <p className="field-tip">
+          <strong>Último snapshot:</strong> {formatDateTime(settings.last_safety_backup_time)}
+        </p>
+
+        <div className="restore-actions mt-1">
+          <button
+            type="button"
+            className="btn-secondary danger"
+            onClick={() => onRestoreSafetyBackup("gdrive")}
+            disabled={isRestoring || !settings.gdrive_enabled}
+          >
+            Restaurar Snapshot 24h (GDrive)
+          </button>
+          <button
+            type="button"
+            className="btn-secondary danger"
+            onClick={() => onRestoreSafetyBackup("onedrive")}
+            disabled={isRestoring || !settings.onedrive_enabled}
+          >
+            Restaurar Snapshot 24h (OneDrive)
+          </button>
+        </div>
+      </section>
     </div>
   );
 };

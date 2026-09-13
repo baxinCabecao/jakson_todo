@@ -1,5 +1,5 @@
 import React from "react";
-import { CheckSquare, Briefcase, Settings as SettingsIcon, Cloud, ListTodo, Grid, ChevronLeft, FileText } from "lucide-react";
+import { CheckSquare, Briefcase, Settings as SettingsIcon, ListTodo, Grid, ChevronLeft, FileText, RefreshCw } from "lucide-react";
 import "./Sidebar.css";
 
 interface SidebarProps {
@@ -101,13 +101,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
           className="btn-backup-sidebar"
           onClick={onManualBackup}
           disabled={isBackingUp}
+          title="Sincronizar tarefas e notas com a nuvem"
         >
-          <Cloud size={16} />
-          <span>{isBackingUp ? "Backup..." : "Backup Nuvem"}</span>
+          <RefreshCw size={15} className={isBackingUp ? "spin" : ""} />
+          <span>{isBackingUp ? "Sincronizando..." : "Sincronizar"}</span>
         </button>
         {lastBackupTime && (
           <span className="last-backup-label">
-            U. Backup: {new Date(lastBackupTime).toLocaleDateString()}
+            Sincronizado: {new Date(lastBackupTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
           </span>
         )}
       </div>

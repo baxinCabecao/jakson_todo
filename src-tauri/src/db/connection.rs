@@ -31,12 +31,153 @@ impl DbConnection {
             }
         }
 
+        // Automatic self-healing: If db_path exists, ensure it is not compressed (gzip)
+        Self::ensure_uncompressed(&db_path);
+
         DbConnection { path: db_path }
     }
 
-    /// Open a connection to the SQLite database
+    /// Helper to ensure the database file on disk is decompressed if it was stored as gzip
+    pub fn ensure_uncompressed(db_path: &PathBuf) {
+        if db_path.exists() {
+            if let Ok(bytes) = fs::read(db_path) {
+                if crate::backup::compression::is_gzipped(&bytes) {
+                    eprintln!("[DbConnection] Detectado arquivo de banco de dados comprimido (gzip). Descomprimindo automaticamente...");
+                    if let Ok(decompressed) = crate::backup::compression::decompress_db_if_needed(&bytes) {
+                        let _ = fs::write(db_path, decompressed);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Open a connection to the SQLite database with automatic corruption recovery
     pub fn get_conn(&self) -> Result<Connection> {
-        Connection::open(&self.path)
+        Self::ensure_uncompressed(&self.path);
+
+        match Connection::open(&self.path) {
+            Ok(conn) => {
+                // Verify that it is actually a valid SQLite database
+                if conn.query_row("PRAGMA schema_version", [], |_| Ok(())).is_err() {
+                    eprintln!("[DbConnection] Banco de dados corrompido ou inválido. Tentando restaurar de backup...");
+                    let bak_path = self.path.with_extension("db.bak");
+                    if bak_path.exists() {
+                        let _ = fs::copy(&bak_path, &self.path);
+                        return Connection::open(&self.path);
+                    }
+                }
+                Ok(conn)
+            }
+            Err(e) => {
+                let bak_path = self.path.with_extension("db.bak");
+                if bak_path.exists() {
+                    eprintln!("[DbConnection] Falha ao abrir banco ({:?}). Tentando restaurar de .bak...", e);
+                    let _ = fs::copy(&bak_path, &self.path);
+                    Connection::open(&self.path)
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    /// Check if a column exists in a specific SQLite table
+    fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
+        let pragma_sql = format!("PRAGMA table_info({})", table);
+        let mut stmt = conn.prepare(&pragma_sql)?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let name: String = row.get(1)?;
+            if name.eq_ignore_ascii_case(column) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Automatic schema migration to ensure UUIDs, timestamps, and tombstones exist
+    fn migrate_schema(conn: &Connection) -> Result<()> {
+        // 1. Tasks table columns
+        if !Self::column_exists(conn, "tasks", "uuid")? {
+            conn.execute("ALTER TABLE tasks ADD COLUMN uuid TEXT", [])?;
+        }
+        if !Self::column_exists(conn, "tasks", "updated_at")? {
+            conn.execute("ALTER TABLE tasks ADD COLUMN updated_at TEXT", [])?;
+        }
+        if !Self::column_exists(conn, "tasks", "is_deleted")? {
+            conn.execute("ALTER TABLE tasks ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0", [])?;
+        }
+        if !Self::column_exists(conn, "tasks", "deleted_at")? {
+            conn.execute("ALTER TABLE tasks ADD COLUMN deleted_at TEXT", [])?;
+        }
+
+        // 2. Subtasks table columns
+        if !Self::column_exists(conn, "subtasks", "uuid")? {
+            conn.execute("ALTER TABLE subtasks ADD COLUMN uuid TEXT", [])?;
+        }
+        if !Self::column_exists(conn, "subtasks", "updated_at")? {
+            conn.execute("ALTER TABLE subtasks ADD COLUMN updated_at TEXT", [])?;
+        }
+
+        // 3. Notes table columns
+        if !Self::column_exists(conn, "notes", "uuid")? {
+            conn.execute("ALTER TABLE notes ADD COLUMN uuid TEXT", [])?;
+        }
+        if !Self::column_exists(conn, "notes", "is_deleted")? {
+            conn.execute("ALTER TABLE notes ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0", [])?;
+        }
+        if !Self::column_exists(conn, "notes", "deleted_at")? {
+            conn.execute("ALTER TABLE notes ADD COLUMN deleted_at TEXT", [])?;
+        }
+
+        // Populate missing UUIDs for tasks
+        {
+            let mut stmt = conn.prepare("SELECT id FROM tasks WHERE uuid IS NULL OR uuid = ''")?;
+            let ids: Vec<i64> = stmt.query_map([], |row| row.get(0))?.filter_map(Result::ok).collect();
+            for id in ids {
+                let u = uuid::Uuid::new_v4().to_string();
+                conn.execute("UPDATE tasks SET uuid = ?1 WHERE id = ?2", params![u, id])?;
+            }
+        }
+
+        // Populate missing updated_at for tasks
+        conn.execute(
+            "UPDATE tasks SET updated_at = created_at WHERE updated_at IS NULL OR updated_at = ''",
+            [],
+        )?;
+
+        // Populate missing UUIDs for subtasks
+        {
+            let mut stmt = conn.prepare("SELECT id, created_at FROM subtasks WHERE uuid IS NULL OR uuid = ''")?;
+            let sub_data: Vec<(i64, String)> = stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .filter_map(Result::ok)
+                .collect();
+            for (id, created) in sub_data {
+                let u = uuid::Uuid::new_v4().to_string();
+                conn.execute(
+                    "UPDATE subtasks SET uuid = ?1, updated_at = COALESCE(updated_at, ?2) WHERE id = ?3",
+                    params![u, created, id],
+                )?;
+            }
+        }
+
+        // Populate missing UUIDs for notes
+        {
+            let mut stmt = conn.prepare("SELECT id FROM notes WHERE uuid IS NULL OR uuid = ''")?;
+            let ids: Vec<i64> = stmt.query_map([], |row| row.get(0))?.filter_map(Result::ok).collect();
+            for id in ids {
+                let u = uuid::Uuid::new_v4().to_string();
+                conn.execute("UPDATE notes SET uuid = ?1 WHERE id = ?2", params![u, id])?;
+            }
+        }
+
+        // Create indexes for fast UUID lookup
+        let _ = conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_uuid ON tasks(uuid)", []);
+        let _ = conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_subtasks_uuid ON subtasks(uuid)", []);
+        let _ = conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_notes_uuid ON notes(uuid)", []);
+
+        Ok(())
     }
 
     /// Create tables if they do not exist
@@ -47,12 +188,16 @@ impl DbConnection {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                uuid TEXT NOT NULL,
                 title TEXT NOT NULL,
                 description TEXT,
                 due_date TEXT,
                 priority TEXT NOT NULL CHECK(priority IN ('high', 'medium', 'low')),
                 status TEXT NOT NULL CHECK(status IN ('todo', 'in_progress', 'completed')),
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                deleted_at TEXT
             )",
             [],
         )?;
@@ -61,6 +206,7 @@ impl DbConnection {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS subtasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                uuid TEXT NOT NULL,
                 task_id INTEGER NOT NULL,
                 title TEXT NOT NULL,
                 description TEXT,
@@ -68,6 +214,7 @@ impl DbConnection {
                 priority TEXT NOT NULL CHECK(priority IN ('high', 'medium', 'low')),
                 completed INTEGER NOT NULL DEFAULT 0 CHECK(completed IN (0, 1)),
                 created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
                 FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
             )",
             [],
@@ -77,11 +224,14 @@ impl DbConnection {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS notes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                uuid TEXT NOT NULL,
                 title TEXT NOT NULL,
                 content TEXT NOT NULL DEFAULT '',
                 is_pinned INTEGER NOT NULL DEFAULT 0 CHECK(is_pinned IN (0, 1)),
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                is_deleted INTEGER NOT NULL DEFAULT 0,
+                deleted_at TEXT
             )",
             [],
         )?;
@@ -95,7 +245,8 @@ impl DbConnection {
             [],
         )?;
 
-        // Seed default settings if they don't exist
+        // Run schema migration and seed default settings
+        Self::migrate_schema(&conn)?;
         self.seed_default_settings(&conn)?;
 
         Ok(())

@@ -2,6 +2,12 @@ use crate::backup::oauth::get_effective_onedrive_client_id;
 use crate::backup::types::{OneDriveFileResponse, RemoteBackupInfo, TokenResponse};
 use crate::db::AppSettings;
 
+pub const SYNC_PAYLOAD_FILENAME: &str = "jakson_todo_sync_v2.json.gz";
+pub const SAFETY_BACKUP_FILENAME: &str = "jakson_todo_safety_24h.json.gz";
+pub const BACKUP_FILENAME: &str = "jakson_todo_sync_v2.json.gz";
+#[allow(dead_code)]
+pub const LEGACY_BACKUP_FILENAME: &str = "jakson_todo_backup.db";
+
 /// Refresh OneDrive access token
 pub async fn refresh_onedrive_access_token(
     client_id: &str,
@@ -34,13 +40,13 @@ pub async fn refresh_onedrive_access_token(
     Ok(token_resp.access_token)
 }
 
-/// Upload backup file to OneDrive
-pub async fn upload_to_onedrive(
+/// Upload a file to OneDrive root directory
+pub async fn upload_file_to_onedrive(
     access_token: &str,
+    filename: &str,
     db_bytes: Vec<u8>,
 ) -> Result<(), String> {
     let client = reqwest::Client::new();
-    let filename = "jakson_todo_backup.db";
     let url = format!(
         "https://graph.microsoft.com/v1.0/me/drive/root:/{}:/content",
         filename
@@ -63,9 +69,59 @@ pub async fn upload_to_onedrive(
     Ok(())
 }
 
-/// Query OneDrive for backup file modified time
-pub async fn get_onedrive_backup_info(
+#[allow(dead_code)]
+/// Upload main backup file to OneDrive
+pub async fn upload_to_onedrive(
+    access_token: &str,
+    db_bytes: Vec<u8>,
+) -> Result<(), String> {
+    upload_file_to_onedrive(access_token, BACKUP_FILENAME, db_bytes).await
+}
+
+#[allow(dead_code)]
+/// Upload 24h safety backup file to OneDrive
+pub async fn upload_safety_to_onedrive(
+    access_token: &str,
+    db_bytes: Vec<u8>,
+) -> Result<(), String> {
+    upload_file_to_onedrive(access_token, SAFETY_BACKUP_FILENAME, db_bytes).await
+}
+
+/// Download a file from OneDrive root directory
+pub async fn download_file_from_onedrive(
+    access_token: &str,
+    filename: &str,
+) -> Result<Vec<u8>, String> {
+    let client = reqwest::Client::new();
+    let download_url = format!(
+        "https://graph.microsoft.com/v1.0/me/drive/root:/{}:/content",
+        filename
+    );
+    let download_res = client
+        .get(&download_url)
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .map_err(|e| format!("Falha ao baixar '{}' do OneDrive: {}", filename, e))?;
+
+    if !download_res.status().is_success() {
+        let err_text = download_res.text().await.unwrap_or_default();
+        return Err(format!("Erro no download do OneDrive: {}", err_text));
+    }
+
+    let bytes = download_res
+        .bytes()
+        .await
+        .map_err(|e| format!("Falha ao ler dados baixados do OneDrive: {}", e))?
+        .to_vec();
+
+    Ok(bytes)
+}
+
+/// Query OneDrive for file modified time
+pub async fn get_onedrive_file_info(
     settings: &AppSettings,
+    filename: &str,
 ) -> RemoteBackupInfo {
     let mut info = RemoteBackupInfo {
         provider: "OneDrive".to_string(),
@@ -89,9 +145,9 @@ pub async fn get_onedrive_backup_info(
 
     if let Ok(access_token) = refresh_onedrive_access_token(&client_id, refresh_token).await {
         let client = reqwest::Client::new();
-        let url = "https://graph.microsoft.com/v1.0/me/drive/root:/jakson_todo_backup.db";
+        let url = format!("https://graph.microsoft.com/v1.0/me/drive/root:/{}", filename);
 
-        if let Ok(res) = client.get(url).bearer_auth(&access_token).send().await {
+        if let Ok(res) = client.get(&url).bearer_auth(&access_token).send().await {
             if res.status().is_success() {
                 if let Ok(file_info) = res.json::<OneDriveFileResponse>().await {
                     info.exists = true;
@@ -102,4 +158,19 @@ pub async fn get_onedrive_backup_info(
     }
 
     info
+}
+
+/// Query OneDrive for main backup file modified time
+pub async fn get_onedrive_backup_info(
+    settings: &AppSettings,
+) -> RemoteBackupInfo {
+    get_onedrive_file_info(settings, BACKUP_FILENAME).await
+}
+
+#[allow(dead_code)]
+/// Query OneDrive for 24h safety backup file modified time
+pub async fn get_onedrive_safety_backup_info(
+    settings: &AppSettings,
+) -> RemoteBackupInfo {
+    get_onedrive_file_info(settings, SAFETY_BACKUP_FILENAME).await
 }
