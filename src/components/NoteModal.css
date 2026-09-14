@@ -4,9 +4,9 @@
   background: #0f172a;
   border: 1px solid var(--border-color);
   border-radius: 16px;
-  width: 95%;
-  max-width: 920px;
-  height: 88vh;
+  width: 96%;
+  max-width: 1600px;
+  height: 90vh;
   padding: 1.25rem;
   box-shadow: var(--shadow-xl);
   display: flex;

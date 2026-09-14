@@ -53,9 +53,9 @@ pub async fn upload_file_to_gdrive(
 ) -> Result<(), String> {
     let client = reqwest::Client::new();
 
-    // 1. Search if file already exists in appDataFolder
+    // 1. Search if file already exists in appDataFolder (ordered by newest first)
     let search_url = format!(
-        "https://www.googleapis.com/drive/v3/files?spaces={}&q=name='{}' and trashed=false&fields=files(id,name)",
+        "https://www.googleapis.com/drive/v3/files?spaces={}&q=name='{}' and trashed=false&orderBy=modifiedTime desc&fields=files(id,name)",
         APPDATA_FOLDER, filename
     );
     let search_res = client
@@ -65,13 +65,24 @@ pub async fn upload_file_to_gdrive(
         .await
         .map_err(|e| format!("Falha ao consultar pasta do aplicativo no Google Drive: {}", e))?;
 
+    if !search_res.status().is_success() {
+        let err_text = search_res.text().await.unwrap_or_default();
+        return Err(format!("Falha ao consultar pasta do Google Drive: {}", err_text));
+    }
+
     let list: GDriveListResponse = search_res
         .json()
         .await
         .map_err(|e| format!("Falha ao ler listagem de arquivos do Google Drive: {}", e))?;
 
     if let Some(existing_file) = list.files.first() {
-        // Update existing file in appDataFolder
+        // Clean up older duplicate files with the same name if any exist
+        for duplicate in list.files.iter().skip(1) {
+            let del_url = format!("https://www.googleapis.com/drive/v3/files/{}", duplicate.id);
+            let _ = client.delete(&del_url).bearer_auth(access_token).send().await;
+        }
+
+        // Update existing newest file in appDataFolder
         let update_url = format!(
             "https://www.googleapis.com/upload/drive/v3/files/{}?uploadType=media",
             existing_file.id
@@ -146,14 +157,15 @@ pub async fn upload_safety_to_gdrive(
     upload_file_to_gdrive(access_token, SAFETY_BACKUP_FILENAME, "Cópia de segurança 24h do Jakson ToDo", db_bytes).await
 }
 
-/// Download a file from Google Drive appDataFolder
+/// Download a file from Google Drive appDataFolder.
+/// Returns Ok(Some(bytes)) if found, Ok(None) if not found, or Err on API/network error.
 pub async fn download_file_from_gdrive(
     access_token: &str,
     filename: &str,
-) -> Result<Vec<u8>, String> {
+) -> Result<Option<Vec<u8>>, String> {
     let client = reqwest::Client::new();
     let search_url = format!(
-        "https://www.googleapis.com/drive/v3/files?spaces={}&q=name='{}' and trashed=false&fields=files(id)",
+        "https://www.googleapis.com/drive/v3/files?spaces={}&q=name='{}' and trashed=false&orderBy=modifiedTime desc&fields=files(id)",
         APPDATA_FOLDER, filename
     );
     let search_res = client
@@ -162,6 +174,11 @@ pub async fn download_file_from_gdrive(
         .send()
         .await
         .map_err(|e| format!("Falha ao buscar '{}' no Google Drive: {}", filename, e))?;
+
+    if !search_res.status().is_success() {
+        let err_text = search_res.text().await.unwrap_or_default();
+        return Err(format!("Erro ao buscar arquivo no Google Drive: {}", err_text));
+    }
 
     let list: GDriveListResponse = search_res
         .json()
@@ -191,9 +208,9 @@ pub async fn download_file_from_gdrive(
             .map_err(|e| format!("Falha ao ler dados baixados: {}", e))?
             .to_vec();
 
-        Ok(bytes)
+        Ok(Some(bytes))
     } else {
-        Err(format!("Arquivo '{}' não encontrado no Google Drive.", filename))
+        Ok(None)
     }
 }
 
@@ -226,7 +243,7 @@ pub async fn get_gdrive_file_info(
 
     let client = reqwest::Client::new();
     let search_url = format!(
-        "https://www.googleapis.com/drive/v3/files?spaces={}&q=name='{}' and trashed=false&fields=files(id,modifiedTime)",
+        "https://www.googleapis.com/drive/v3/files?spaces={}&q=name='{}' and trashed=false&orderBy=modifiedTime desc&fields=files(id,modifiedTime)",
         APPDATA_FOLDER, filename
     );
 

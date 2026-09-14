@@ -16,16 +16,21 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter};
 
+static SYNC_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Execute intelligent two-way synchronization:
-/// 1. Download active sync payload from cloud.
-/// 2. Two-way reconciliation: merge remote changes with local SQLite records (UUID + Last-Write-Wins + Tombstones).
-/// 3. If remote had newer records: update local DB and emit "cloud-synced" event to frontend.
-/// 4. If local had newer records or merged records: serialize and upload unified state to cloud.
-/// 5. 24h Safety Snapshot: if >= 24h since last snapshot, upload safety snapshot.
+/// 1. Acquire global synchronization lock to prevent race conditions on the same client.
+/// 2. Download active sync payload from cloud (differentiating non-existent file from API errors).
+/// 3. Two-way reconciliation: merge remote changes with local SQLite records (UUID + Last-Write-Wins + Tombstones).
+/// 4. If remote had newer records: update local DB and emit "cloud-synced" event to frontend.
+/// 5. If local had newer records or first sync: serialize and upload unified state to cloud.
+/// 6. 24h Safety Snapshot: if >= 24h since last snapshot, upload safety snapshot.
 pub async fn run_auto_sync(
     app_handle: &AppHandle,
     db_path: PathBuf,
 ) -> Result<SyncResult, String> {
+    let _sync_guard = SYNC_MUTEX.lock().await;
+
     if !db_path.exists() {
         return Err("Arquivo de banco de dados não encontrado.".to_string());
     }
@@ -75,26 +80,46 @@ pub async fn run_auto_sync(
 
     // 1. Download remote sync payload
     let mut remote_payload: Option<SyncPayload> = None;
+    let mut is_first_sync = false;
 
     // Try Google Drive first if available
     if let Some(ref token) = gdrive_token {
-        if let Ok(raw) = download_file_from_gdrive(token, GDRIVE_SYNC_NAME).await {
-            if let Ok(decompressed) = decompress_db_if_needed(&raw) {
-                if let Ok(payload) = serde_json::from_slice::<SyncPayload>(&decompressed) {
-                    remote_payload = Some(payload);
-                }
+        match download_file_from_gdrive(token, GDRIVE_SYNC_NAME).await {
+            Ok(Some(raw)) => {
+                let decompressed = decompress_db_if_needed(&raw)
+                    .map_err(|e| format!("Falha ao descomprimir payload do Google Drive: {}", e))?;
+                let payload = serde_json::from_slice::<SyncPayload>(&decompressed)
+                    .map_err(|e| format!("Falha ao processar payload do Google Drive: {}", e))?;
+                remote_payload = Some(payload);
+            }
+            Ok(None) => {
+                // File legitimately does not exist yet on GDrive
+                is_first_sync = true;
+            }
+            Err(e) => {
+                // Network or API failure: abort immediately to never overwrite remote data
+                return Err(format!("Erro ao acessar Google Drive: {}", e));
             }
         }
     }
 
-    // Fallback to OneDrive if not found on GDrive
-    if remote_payload.is_none() {
+    // Check OneDrive if GDrive was not configured or genuinely had no file yet
+    if remote_payload.is_none() && onedrive_token.is_some() && (gdrive_token.is_none() || is_first_sync) {
         if let Some(ref token) = onedrive_token {
-            if let Ok(raw) = download_file_from_onedrive(token, ONEDRIVE_SYNC_NAME).await {
-                if let Ok(decompressed) = decompress_db_if_needed(&raw) {
-                    if let Ok(payload) = serde_json::from_slice::<SyncPayload>(&decompressed) {
-                        remote_payload = Some(payload);
-                    }
+            match download_file_from_onedrive(token, ONEDRIVE_SYNC_NAME).await {
+                Ok(Some(raw)) => {
+                    let decompressed = decompress_db_if_needed(&raw)
+                        .map_err(|e| format!("Falha ao descomprimir payload do OneDrive: {}", e))?;
+                    let payload = serde_json::from_slice::<SyncPayload>(&decompressed)
+                        .map_err(|e| format!("Falha ao processar payload do OneDrive: {}", e))?;
+                    remote_payload = Some(payload);
+                    is_first_sync = false;
+                }
+                Ok(None) => {
+                    is_first_sync = true;
+                }
+                Err(e) => {
+                    return Err(format!("Erro ao acessar OneDrive: {}", e));
                 }
             }
         }
@@ -104,7 +129,7 @@ pub async fn run_auto_sync(
     let stats: ReconcileStats = if let Some(ref payload) = remote_payload {
         db.reconcile_with_remote(&payload.tasks, &payload.notes)
             .map_err(|e| format!("Erro ao reconciliar dados: {}", e))?
-    } else {
+    } else if is_first_sync {
         // First sync: all local items will be pushed to the cloud
         let total_tasks = db.get_all_sync_tasks().map(|t| t.len()).unwrap_or(0);
         let total_notes = db.get_all_sync_notes().map(|n| n.len()).unwrap_or(0);
@@ -114,6 +139,8 @@ pub async fn run_auto_sync(
             notes_pulled: 0,
             notes_pushed: total_notes,
         }
+    } else {
+        return Err("Falha ao determinar o estado da sincronização na nuvem.".to_string());
     };
 
     // 3. Notify frontend if any records were pulled/updated from the cloud
@@ -138,7 +165,9 @@ pub async fn run_auto_sync(
         None => true,
     };
 
-    let needs_upload = stats.has_pushed_changes() || stats.has_pulled_changes() || remote_payload.is_none() || should_take_safety_snapshot;
+    // Only upload to the cloud if we have local changes to push, if it's the very first sync, or if 24h snapshot is due.
+    // Notice: if we only pulled remote changes and had no local changes, we do NOT re-upload (prevents ping-pong loops).
+    let needs_upload = stats.has_pushed_changes() || is_first_sync || should_take_safety_snapshot;
 
     if needs_upload {
         let all_tasks = db.get_all_sync_tasks().map_err(|e| e.to_string())?;
@@ -160,21 +189,23 @@ pub async fn run_auto_sync(
 
         // Upload to Google Drive if active
         if let Some(ref token) = gdrive_token {
-            let _ = upload_file_to_gdrive(
+            upload_file_to_gdrive(
                 token,
                 GDRIVE_SYNC_NAME,
                 "Dados de Sincronização Jakson ToDo",
                 compressed_bytes.clone(),
-            ).await;
+            ).await
+            .map_err(|e| format!("Falha no envio para o Google Drive: {}", e))?;
         }
 
         // Upload to OneDrive if active
         if let Some(ref token) = onedrive_token {
-            let _ = upload_file_to_onedrive(
+            upload_file_to_onedrive(
                 token,
                 ONEDRIVE_SYNC_NAME,
                 compressed_bytes.clone(),
-            ).await;
+            ).await
+            .map_err(|e| format!("Falha no envio para o OneDrive: {}", e))?;
         }
 
         // 5. 24-Hour Safety Snapshot

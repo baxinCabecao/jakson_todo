@@ -80,6 +80,18 @@ async fn save_settings(settings: AppSettings, state: State<'_, AppState>) -> Res
 }
 
 #[tauri::command]
+async fn save_setting(key: String, value: String, state: State<'_, AppState>) -> Result<(), String> {
+    let db = DbConnection::new(state.db_path.parent().unwrap().to_path_buf());
+    db.save_setting(&key, &value).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_setting(key: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let db = DbConnection::new(state.db_path.parent().unwrap().to_path_buf());
+    db.get_setting(&key).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn trigger_backup(app_handle: AppHandle, state: State<'_, AppState>) -> Result<BackupReport, String> {
     let db = DbConnection::new(state.db_path.parent().unwrap().to_path_buf());
     let settings = db.get_settings().map_err(|e| e.to_string())?;
@@ -360,6 +372,8 @@ pub fn run() {
             exit_app,
             get_settings,
             save_settings,
+            save_setting,
+            get_setting,
             trigger_backup,
             start_oauth,
             handle_oauth_url,

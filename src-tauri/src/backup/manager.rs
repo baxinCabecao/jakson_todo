@@ -250,7 +250,7 @@ async fn download_and_restore(
     db_path: PathBuf,
     settings: AppSettings,
 ) -> Result<(), String> {
-    let raw_bytes = if provider.to_lowercase() == "gdrive" {
+    let raw_bytes_opt = if provider.to_lowercase() == "gdrive" {
         let refresh_token = settings
             .gdrive_refresh_token
             .as_ref()
@@ -274,6 +274,7 @@ async fn download_and_restore(
         download_file_from_onedrive(&access_token, filename).await?
     };
 
+    let raw_bytes = raw_bytes_opt.ok_or_else(|| format!("Arquivo '{}' não encontrado na nuvem.", filename))?;
     restore_payload_or_db_bytes(&raw_bytes, &db_path, settings).map(|_| ())
 }
 

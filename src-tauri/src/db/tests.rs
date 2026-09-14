@@ -341,3 +341,52 @@ fn test_two_way_merge_multi_device_sync() {
     let _ = std::fs::remove_dir_all(dir_a);
     let _ = std::fs::remove_dir_all(dir_b);
 }
+
+#[test]
+fn test_sqlite_wal_mode_and_concurrency() {
+    let temp_dir = std::env::temp_dir().join(format!("test_db_wal_{}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)));
+    let db = DbConnection::new(temp_dir.clone());
+    db.init_db().unwrap();
+
+    // Verify WAL mode is active
+    let conn = db.get_conn().unwrap();
+    let journal_mode: String = conn.query_row("PRAGMA journal_mode", [], |row| row.get(0)).unwrap();
+    assert_eq!(journal_mode.to_lowercase(), "wal");
+
+    // Multiple connections can read simultaneously in WAL mode
+    let conn2 = db.get_conn().unwrap();
+    let count1: i64 = conn.query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0)).unwrap();
+    let count2: i64 = conn2.query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0)).unwrap();
+    assert_eq!(count1, 0);
+    assert_eq!(count2, 0);
+
+    let _ = std::fs::remove_dir_all(temp_dir);
+}
+
+#[test]
+fn test_reconcile_stats_distinction() {
+    let temp_dir = std::env::temp_dir().join(format!("test_db_stats_{}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)));
+    let db = DbConnection::new(temp_dir.clone());
+    db.init_db().unwrap();
+
+    let remote_note = Note {
+        id: None,
+        uuid: Some("remote-uuid-1".to_string()),
+        title: "Nota Remota".to_string(),
+        content: "Remoto".to_string(),
+        is_pinned: false,
+        created_at: "2026-09-13T10:00:00Z".to_string(),
+        updated_at: "2026-09-13T10:00:00Z".to_string(),
+        is_deleted: false,
+        deleted_at: None,
+    };
+
+    // When pulling a note that exists remotely but not locally:
+    let stats = db.reconcile_with_remote(&[], &[remote_note]).unwrap();
+    assert_eq!(stats.notes_pulled, 1);
+    assert_eq!(stats.notes_pushed, 0);
+    assert!(stats.has_pulled_changes());
+    assert!(!stats.has_pushed_changes(), "Should not have pushed changes when only pulling");
+
+    let _ = std::fs::remove_dir_all(temp_dir);
+}

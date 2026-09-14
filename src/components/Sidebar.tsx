@@ -1,5 +1,5 @@
 import React from "react";
-import { CheckSquare, Briefcase, Settings as SettingsIcon, ListTodo, Grid, ChevronLeft, FileText, RefreshCw } from "lucide-react";
+import { CheckSquare, Briefcase, Settings as SettingsIcon, ListTodo, Grid, ChevronLeft, FileText, RefreshCw, Pin } from "lucide-react";
 import "./Sidebar.css";
 
 interface SidebarProps {
@@ -12,6 +12,8 @@ interface SidebarProps {
   setFontSize: (size: number) => void;
   isCollapsed: boolean;
   setIsCollapsed: (collapsed: boolean) => void;
+  isPinned?: boolean;
+  onTogglePin?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -24,6 +26,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setFontSize,
   isCollapsed,
   setIsCollapsed,
+  isPinned = false,
+  onTogglePin,
 }) => {
   const handleNavClick = (tab: "tasks" | "notes" | "dashboard" | "settings" | "eisenhower") => {
     setActiveTab(tab);
@@ -37,14 +41,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="sidebar-brand">
         <ListTodo className="sidebar-logo-icon" size={24} />
         <h2>Jakson ToDo</h2>
-        <button
-          type="button"
-          className="btn-sidebar-collapse"
-          onClick={() => setIsCollapsed(true)}
-          title="Fechar Menu"
-        >
-          <ChevronLeft size={22} />
-        </button>
+        <div className="sidebar-brand-actions">
+          {onTogglePin && (
+            <button
+              type="button"
+              className={`btn-sidebar-pin ${isPinned ? "active" : ""}`}
+              onClick={onTogglePin}
+              title={isPinned ? "Desafixar barra lateral" : "Fixar barra lateral (sempre visível)"}
+            >
+              <Pin size={18} fill={isPinned ? "currentColor" : "none"} />
+            </button>
+          )}
+          {(!isPinned || (typeof window !== "undefined" && window.innerWidth <= 768)) && (
+            <button
+              type="button"
+              className="btn-sidebar-collapse"
+              onClick={() => setIsCollapsed(true)}
+              title="Fechar Menu"
+            >
+              <ChevronLeft size={22} />
+            </button>
+          )}
+        </div>
       </div>
 
       <nav className="sidebar-nav">

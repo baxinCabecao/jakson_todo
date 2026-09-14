@@ -57,6 +57,10 @@ fn default_backup_frequency() -> i64 {
     60
 }
 
+fn default_sidebar_pinned() -> bool {
+    true
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
     #[serde(default)]
@@ -81,4 +85,6 @@ pub struct AppSettings {
     pub last_backup_time: Option<String>,
     #[serde(default)]
     pub last_safety_backup_time: Option<String>,
+    #[serde(default = "default_sidebar_pinned")]
+    pub desktop_sidebar_pinned: bool,
 }

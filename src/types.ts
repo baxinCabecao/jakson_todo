@@ -48,6 +48,7 @@ export interface AppSettings {
   backup_frequency_mins: number;
   last_backup_time?: string;
   last_safety_backup_time?: string;
+  desktop_sidebar_pinned?: boolean;
 }
 
 export interface SyncResult {

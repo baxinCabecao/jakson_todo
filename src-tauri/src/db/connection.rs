@@ -51,34 +51,37 @@ impl DbConnection {
         }
     }
 
-    /// Open a connection to the SQLite database with automatic corruption recovery
+    /// Open a connection to the SQLite database with WAL mode, busy timeout, and corruption recovery
     pub fn get_conn(&self) -> Result<Connection> {
         Self::ensure_uncompressed(&self.path);
 
-        match Connection::open(&self.path) {
-            Ok(conn) => {
-                // Verify that it is actually a valid SQLite database
-                if conn.query_row("PRAGMA schema_version", [], |_| Ok(())).is_err() {
-                    eprintln!("[DbConnection] Banco de dados corrompido ou inválido. Tentando restaurar de backup...");
-                    let bak_path = self.path.with_extension("db.bak");
-                    if bak_path.exists() {
-                        let _ = fs::copy(&bak_path, &self.path);
-                        return Connection::open(&self.path);
-                    }
-                }
-                Ok(conn)
-            }
+        let conn = match Connection::open(&self.path) {
+            Ok(c) => c,
             Err(e) => {
-                let bak_path = self.path.with_extension("db.bak");
-                if bak_path.exists() {
-                    eprintln!("[DbConnection] Falha ao abrir banco ({:?}). Tentando restaurar de .bak...", e);
-                    let _ = fs::copy(&bak_path, &self.path);
-                    Connection::open(&self.path)
-                } else {
-                    Err(e)
-                }
+                eprintln!("[DbConnection] Erro ao abrir banco de dados ({:?})", e);
+                return Err(e);
+            }
+        };
+
+        // Configure 5000ms busy timeout to prevent SQLITE_BUSY under concurrent access
+        let _ = conn.busy_timeout(std::time::Duration::from_millis(5000));
+        // Configure WAL mode for concurrent readers and writer
+        let _ = conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;");
+
+        // Verify that it is actually a valid SQLite database
+        if conn.query_row("PRAGMA schema_version", [], |_| Ok(())).is_err() {
+            eprintln!("[DbConnection] Banco de dados corrompido ou inválido. Tentando restaurar de backup...");
+            let bak_path = self.path.with_extension("db.bak");
+            if bak_path.exists() {
+                let _ = fs::copy(&bak_path, &self.path);
+                let restored_conn = Connection::open(&self.path)?;
+                let _ = restored_conn.busy_timeout(std::time::Duration::from_millis(5000));
+                let _ = restored_conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;");
+                return Ok(restored_conn);
             }
         }
+
+        Ok(conn)
     }
 
     /// Check if a column exists in a specific SQLite table
@@ -258,6 +261,7 @@ impl DbConnection {
             ("onedrive_enabled", "0"),
             ("gdrive_enabled", "0"),
             ("backup_frequency_mins", "60"),
+            ("desktop_sidebar_pinned", "1"),
         ];
 
         for &(key, val) in &defaults {

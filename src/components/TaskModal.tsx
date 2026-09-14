@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { X, Trash2, Square, CheckCircle2 } from "lucide-react";
 import { Task, Subtask } from "../types";
 import { DatePicker } from "./DatePicker";
@@ -25,6 +25,15 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   const [subtasks, setSubtasks] = useState<Subtask[]>([]);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState("");
 
+  const titleInputRef = useRef<HTMLTextAreaElement>(null);
+
+  const adjustTitleHeight = (el?: HTMLTextAreaElement | null) => {
+    const target = el || titleInputRef.current;
+    if (!target) return;
+    target.style.height = "auto";
+    target.style.height = `${target.scrollHeight}px`;
+  };
+
   // Initialize form when editingTask changes or modal opens
   useEffect(() => {
     if (editingTask) {
@@ -44,6 +53,12 @@ export const TaskModal: React.FC<TaskModalProps> = ({
     }
     setNewSubtaskTitle("");
   }, [editingTask, isOpen]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setTimeout(() => adjustTitleHeight(), 0);
+    }
+  }, [title, isOpen]);
 
   if (!isOpen) return null;
 
@@ -91,13 +106,23 @@ export const TaskModal: React.FC<TaskModalProps> = ({
     <div className="modal-backdrop">
       <div className="modal-card animate-fade-in">
         <div className="modal-header">
-          <input
-            type="text"
+          <textarea
+            ref={titleInputRef}
             required
+            rows={1}
             className="modal-title-input"
             placeholder="Informe o título da tarefa..."
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              adjustTitleHeight(e.target);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit(e);
+              }
+            }}
           />
           <button className="btn-close" onClick={onClose} type="button">
             <X size={20} />

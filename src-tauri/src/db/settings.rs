@@ -24,6 +24,7 @@ impl DbConnection {
         let mut backup_frequency_mins = 60;
         let mut last_backup_time = None;
         let mut last_safety_backup_time = None;
+        let mut desktop_sidebar_pinned = true;
 
         for row in rows {
             let (key, val) = row?;
@@ -43,6 +44,7 @@ impl DbConnection {
                 }
                 "last_backup_time" => last_backup_time = Some(val),
                 "last_safety_backup_time" => last_safety_backup_time = Some(val),
+                "desktop_sidebar_pinned" => desktop_sidebar_pinned = val != "0",
                 _ => {}
             }
         }
@@ -67,6 +69,7 @@ impl DbConnection {
             backup_frequency_mins,
             last_backup_time: clean_opt(last_backup_time),
             last_safety_backup_time: clean_opt(last_safety_backup_time),
+            desktop_sidebar_pinned,
         })
     }
 
@@ -113,6 +116,7 @@ impl DbConnection {
             ("backup_frequency_mins", settings.backup_frequency_mins.to_string()),
             ("last_backup_time", settings.last_backup_time.unwrap_or_default()),
             ("last_safety_backup_time", settings.last_safety_backup_time.unwrap_or_default()),
+            ("desktop_sidebar_pinned", if settings.desktop_sidebar_pinned { "1".to_string() } else { "0".to_string() }),
         ];
 
         for &(key, ref val) in &fields {

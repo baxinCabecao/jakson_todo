@@ -5,6 +5,8 @@
   flex-direction: column;
   gap: 1.25rem;
   width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .notes-header-actions {
@@ -68,6 +70,8 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 0.85rem;
+  width: 100%;
+  min-width: 0;
 }
 
 /* Note Item Card - Only Title, Pin and Delete */
@@ -83,6 +87,10 @@
   transition: all var(--transition-fast);
   cursor: pointer;
   position: relative;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
 }
 
 .note-item-card:hover {
@@ -106,9 +114,9 @@
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: break-word;
   line-height: 1.4;
 }
 
@@ -116,6 +124,7 @@
   display: flex;
   align-items: center;
   gap: 0.25rem;
+  flex-shrink: 0;
 }
 
 .btn-note-action {
@@ -184,11 +193,24 @@
   }
 
   .notes-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: 100%;
     gap: 0.65rem;
+    width: 100%;
+    min-width: 0;
   }
 
   .note-item-card {
     padding: 0.8rem 0.9rem;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    min-width: 0;
+  }
+
+  .note-item-title {
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    line-height: 1.4;
   }
 }

@@ -87,11 +87,12 @@ pub async fn upload_safety_to_onedrive(
     upload_file_to_onedrive(access_token, SAFETY_BACKUP_FILENAME, db_bytes).await
 }
 
-/// Download a file from OneDrive root directory
+/// Download a file from OneDrive root directory.
+/// Returns Ok(Some(bytes)) if found, Ok(None) if 404 (file doesn't exist yet), or Err on network/API failure.
 pub async fn download_file_from_onedrive(
     access_token: &str,
     filename: &str,
-) -> Result<Vec<u8>, String> {
+) -> Result<Option<Vec<u8>>, String> {
     let client = reqwest::Client::new();
     let download_url = format!(
         "https://graph.microsoft.com/v1.0/me/drive/root:/{}:/content",
@@ -104,6 +105,10 @@ pub async fn download_file_from_onedrive(
         .await
         .map_err(|e| format!("Falha ao baixar '{}' do OneDrive: {}", filename, e))?;
 
+    if download_res.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+
     if !download_res.status().is_success() {
         let err_text = download_res.text().await.unwrap_or_default();
         return Err(format!("Erro no download do OneDrive: {}", err_text));
@@ -115,7 +120,7 @@ pub async fn download_file_from_onedrive(
         .map_err(|e| format!("Falha ao ler dados baixados do OneDrive: {}", e))?
         .to_vec();
 
-    Ok(bytes)
+    Ok(Some(bytes))
 }
 
 /// Query OneDrive for file modified time

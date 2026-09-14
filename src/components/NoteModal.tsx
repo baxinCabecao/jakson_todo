@@ -64,7 +64,51 @@ export const NoteModal: React.FC<NoteModalProps> = ({
   });
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isScrollingSyncRef = useRef<boolean>(false);
+
+  const handleEditorScroll = () => {
+    if (viewMode !== "split" || !textareaRef.current || !previewRef.current) return;
+    if (isScrollingSyncRef.current) return;
+
+    const editor = textareaRef.current;
+    const preview = previewRef.current;
+
+    const editorScrollable = editor.scrollHeight - editor.clientHeight;
+    if (editorScrollable <= 0) return;
+
+    const ratio = editor.scrollTop / editorScrollable;
+    const previewScrollable = preview.scrollHeight - preview.clientHeight;
+
+    isScrollingSyncRef.current = true;
+    preview.scrollTop = ratio * previewScrollable;
+
+    requestAnimationFrame(() => {
+      isScrollingSyncRef.current = false;
+    });
+  };
+
+  const handlePreviewScroll = () => {
+    if (viewMode !== "split" || !textareaRef.current || !previewRef.current) return;
+    if (isScrollingSyncRef.current) return;
+
+    const editor = textareaRef.current;
+    const preview = previewRef.current;
+
+    const previewScrollable = preview.scrollHeight - preview.clientHeight;
+    if (previewScrollable <= 0) return;
+
+    const ratio = preview.scrollTop / previewScrollable;
+    const editorScrollable = editor.scrollHeight - editor.clientHeight;
+
+    isScrollingSyncRef.current = true;
+    editor.scrollTop = ratio * editorScrollable;
+
+    requestAnimationFrame(() => {
+      isScrollingSyncRef.current = false;
+    });
+  };
 
   // Initialize or reset form state
   useEffect(() => {
@@ -193,6 +237,7 @@ export const NoteModal: React.FC<NoteModalProps> = ({
     const now = new Date().toISOString();
     const notePayload: Note = {
       id: editingNote?.id,
+      uuid: editingNote?.uuid,
       title: finalTitle,
       content,
       is_pinned: isPinned,
@@ -349,13 +394,18 @@ export const NoteModal: React.FC<NoteModalProps> = ({
                 placeholder="Escreva sua nota em Markdown... (Dica: use # Título para definir o título automaticamente)"
                 value={content}
                 onChange={(e) => handleContentChange(e.target.value)}
+                onScroll={handleEditorScroll}
               />
             </div>
           )}
 
           {(viewMode === "preview" || viewMode === "split") && (
             <div className="note-preview-pane">
-              <div className="note-preview-scroll">
+              <div
+                ref={previewRef}
+                className="note-preview-scroll"
+                onScroll={handlePreviewScroll}
+              >
                 {content.trim() ? (
                   <div className="markdown-preview">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>

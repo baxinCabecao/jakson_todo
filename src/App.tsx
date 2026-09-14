@@ -31,10 +31,35 @@ function App() {
     return typeof window !== "undefined" && window.innerWidth <= 768;
   });
 
+  const [isSidebarPinned, setIsSidebarPinned] = useState<boolean>(() => {
+    if (typeof window !== "undefined" && window.innerWidth <= 768) return false;
+    return true;
+  });
+
   const handleToggleSidebar = (collapsed: boolean) => {
     setIsSidebarCollapsed(collapsed);
     localStorage.setItem("sidebar-collapsed", String(collapsed));
   };
+
+  const handleTogglePinSidebar = async () => {
+    if (typeof window === "undefined" || window.innerWidth <= 768) return;
+    const newPinned = !isSidebarPinned;
+    setIsSidebarPinned(newPinned);
+    if (newPinned) {
+      setIsSidebarCollapsed(false);
+      localStorage.setItem("sidebar-collapsed", "false");
+    }
+    try {
+      await invoke("save_setting", {
+        key: "desktop_sidebar_pinned",
+        value: newPinned ? "1" : "0",
+      });
+      setSettings((prev) => ({ ...prev, desktop_sidebar_pinned: newPinned }));
+    } catch (e) {
+      console.error("Erro ao salvar preferência de sidebar fixada:", e);
+    }
+  };
+
   const [settings, setSettings] = useState<AppSettings>({
     onedrive_enabled: false,
     gdrive_enabled: false,
@@ -335,6 +360,13 @@ function App() {
     try {
       const res = await invoke<AppSettings>("get_settings");
       setSettings(res);
+      if (typeof window !== "undefined" && window.innerWidth > 768) {
+        const pinned = res.desktop_sidebar_pinned !== false;
+        setIsSidebarPinned(pinned);
+        if (pinned) {
+          setIsSidebarCollapsed(false);
+        }
+      }
     } catch (e) {
       console.error("Erro ao buscar configurações:", e);
     }
@@ -386,6 +418,10 @@ function App() {
   };
 
   const handleManualBackup = async () => {
+    if (autoSyncTimerRef.current) {
+      clearTimeout(autoSyncTimerRef.current);
+      autoSyncTimerRef.current = null;
+    }
     setIsBackingUp(true);
     try {
       const res = await invoke<SyncResult>("auto_sync");
@@ -520,7 +556,7 @@ function App() {
         await invoke("create_task", { task: taskPayload });
       }
       setIsTaskModalOpen(false);
-      loadTasks();
+      await loadTasks();
       triggerDebouncedSync();
     } catch (e) {
       alert(`Erro ao salvar tarefa: ${e}`);
@@ -532,7 +568,7 @@ function App() {
     if (!confirm("Tem certeza que deseja excluir esta tarefa?")) return;
     try {
       await invoke("delete_task", { id });
-      loadTasks();
+      await loadTasks();
       triggerDebouncedSync();
     } catch (e) {
       alert(`Erro ao excluir tarefa: ${e}`);
@@ -560,7 +596,7 @@ function App() {
         await invoke("create_note", { note: notePayload });
       }
       setIsNoteModalOpen(false);
-      loadNotes();
+      await loadNotes();
       triggerDebouncedSync();
     } catch (e) {
       alert(`Erro ao salvar nota: ${e}`);
@@ -571,7 +607,7 @@ function App() {
   const handleDeleteNote = async (id: number) => {
     try {
       await invoke("delete_note", { id });
-      loadNotes();
+      await loadNotes();
       triggerDebouncedSync();
     } catch (e) {
       alert(`Erro ao excluir nota: ${e}`);
@@ -702,6 +738,8 @@ function App() {
         setFontSize={setFontSize}
         isCollapsed={isSidebarCollapsed}
         setIsCollapsed={handleToggleSidebar}
+        isPinned={isSidebarPinned}
+        onTogglePin={handleTogglePinSidebar}
       />
 
       {/* Backdrop overlay for mobile drawer */}
