@@ -14,6 +14,14 @@
   animation: backdropFadeIn 0.2s forwards;
 }
 
+/* Desktop: when the sidebar is pinned and open, modals use only the remaining space */
+@media (min-width: 769px) {
+  .sidebar-pinned:not(.sidebar-collapsed) .modal-backdrop {
+    left: var(--sidebar-width, 280px);
+    width: calc(100vw - var(--sidebar-width, 280px));
+  }
+}
+
 .modal-card {
   background: #0f172a;
   border: 1px solid var(--border-color);

@@ -726,7 +726,11 @@ function App() {
 
 
   return (
-    <div className={`app-container ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    <div
+      className={`app-container ${isSidebarCollapsed ? "sidebar-collapsed" : ""} ${
+        isSidebarPinned ? "sidebar-pinned" : ""
+      }`}
+    >
       {/* Sidebar Navigation */}
       <Sidebar
         activeTab={activeTab}
